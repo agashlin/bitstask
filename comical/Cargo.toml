@@ -1,0 +1,15 @@
+[package]
+name = "comical"
+version = "0.0.0"
+authors = ["Adam Gashlin <agashlin@mozilla.com>"]
+
+[dependencies]
+winapi = { version = "0.3.6", features = ["combaseapi",
+                                          "impl-default",
+                                          "minwindef",
+                                          "objbase",
+                                          "oleauto",
+                                          "rpcdce",
+                                          "winerror",
+                                          "wtypesbase"] }
+wio = "0.2"

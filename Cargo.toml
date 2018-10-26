@@ -1,0 +1,15 @@
+[package]
+name = "bitstask"
+version = "0.0.0"
+authors = ["Adam Gashlin <agashlin@mozilla.com>"]
+
+[patch.crates-io]
+winapi = { path = "../winapi-rs" }
+
+[dependencies]
+comical = { path = "./comical" }
+wio = "0.2"
+winapi = { version = "0.3.6", features = ["minwindef",
+                                          "processthreadsapi",
+                                          "taskschd",
+                                          "winbase"] }
