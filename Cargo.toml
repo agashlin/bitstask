@@ -10,6 +10,8 @@ winapi = { path = "../winapi-rs" }
 comical = { path = "./comical" }
 wio = "0.2"
 winapi = { version = "0.3.6", features = ["minwindef",
+                                          "ntdef",
                                           "processthreadsapi",
                                           "taskschd",
-                                          "winbase"] }
+                                          "winbase",
+                                          "winerror"] }

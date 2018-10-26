@@ -43,8 +43,11 @@ fn entry() -> Result<(), String> {
         } else {
             Err(String::from("uninstall takes no arguments"))
         },
-        "run" => unimplemented!("run"),
-        "task" => unimplemented!("task"),
+        "run" => task_service::run_on_demand(TASK_NAME, cmd_args),
+        "task" => {
+            // INSERT TASK HERE
+            Ok(())
+        },
         _ => Err(String::from("Unknown command.")),
     }
 }

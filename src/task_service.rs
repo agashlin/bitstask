@@ -1,3 +1,6 @@
+use std::ffi::OsString;
+use std::ptr::null_mut;
+
 use comical::bstr::{bstr_from_u16, BStr};
 use comical::com::{cast, check_hresult, check_nonzero, getter};
 use comical::create_instance;
@@ -5,9 +8,10 @@ use comical::variant::{Variant, VARIANT_FALSE, VARIANT_TRUE};
 
 use winapi::shared::minwindef::{DWORD, MAX_PATH};
 use winapi::shared::ntdef::LONG;
+use winapi::shared::winerror::{ERROR_FILE_NOT_FOUND, HRESULT_FROM_WIN32};
 use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::taskschd::{
-    IExecAction, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE,
+    IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE,
     TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
 };
 use winapi::um::winbase::QueryFullProcessImageNameW;
@@ -29,6 +33,19 @@ fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>),
     })?;
 
     Ok((task_service, root_folder))
+}
+
+fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>, String> {
+    let root_folder = connect_task_service()?.1;
+    let mut task = null_mut();
+
+    let hr = unsafe { root_folder.GetTask(task_path.get(), &mut task as *mut *mut _) };
+    if hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) {
+        Ok(None)
+    } else {
+        check_hresult("GetTask", hr)?;
+        Ok(Some(unsafe { ComPtr::from_raw(task) }))
+    }
 }
 
 pub fn install(task_name: &str) -> Result<(), String> {
@@ -153,6 +170,29 @@ pub fn uninstall(task_name: &str) -> Result<(), String> {
     check_hresult("DeleteTask", unsafe {
         root_folder.DeleteTask(task_name.get(), 0)
     })?;
+
+    Ok(())
+}
+
+pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<(), String> {
+    let task_name = BStr::from(task_name);
+
+    let text = vec![0];
+    /*if args.len() == 1 {
+        text = args[0].encode_wide().collect::<Vec<u16>>();
+    } else {
+        text = vec![0];
+    }*/
+
+    let maybe_task = get_task(&task_name)?;
+    if maybe_task.is_none() {
+        return Err(String::from("No such task"));
+    }
+
+    getter("Run Task",
+           |rt| unsafe {
+               maybe_task.unwrap().Run(Variant::wrap(&bstr_from_u16(&text)).get(), rt)
+           })?;
 
     Ok(())
 }
