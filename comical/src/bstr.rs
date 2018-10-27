@@ -1,4 +1,5 @@
 use std::fmt;
+use std::mem;
 use std::ptr;
 
 use winapi::shared::basetsd::UINT32;
@@ -78,6 +79,11 @@ impl BStr {
                 String::from_utf16_lossy(slice)
             }
         }
+    }
+
+    #[inline(always)]
+    pub fn take(&mut self) -> BSTR {
+        mem::replace(&mut self.0, ptr::null_mut())
     }
 }
 

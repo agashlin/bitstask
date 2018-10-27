@@ -1,18 +1,21 @@
 use std::ffi::OsString;
+use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 
 use comical::bstr::{bstr_from_u16, BStr};
 use comical::com::{cast, check_hresult, check_nonzero, getter};
 use comical::create_instance;
-use comical::variant::{Variant, VARIANT_FALSE, VARIANT_TRUE};
+use comical::safearray::SafeArray;
+use comical::variant::{Variant, VariantValue, VARIANT_FALSE, VARIANT_TRUE};
 
 use winapi::shared::minwindef::{DWORD, MAX_PATH};
 use winapi::shared::ntdef::LONG;
 use winapi::shared::winerror::{ERROR_FILE_NOT_FOUND, HRESULT_FROM_WIN32};
 use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::taskschd::{
-    IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC, TASK_CREATE_OR_UPDATE,
-    TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_IGNORE_NEW, TASK_LOGON_SERVICE_ACCOUNT,
+    IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC,
+    TASK_CREATE_OR_UPDATE, TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_IGNORE_NEW,
+    TASK_LOGON_SERVICE_ACCOUNT,
 };
 use winapi::um::winbase::QueryFullProcessImageNameW;
 use wio::com::ComPtr;
@@ -134,7 +137,7 @@ pub fn install(task_name: &str) -> Result<(), String> {
         })?;
 
         check_hresult("Set exec action args", unsafe {
-            exec_action.put_Arguments(BStr::from("task $(Arg0)").get())
+            exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get())
         })?;
     }
 
@@ -143,10 +146,10 @@ pub fn install(task_name: &str) -> Result<(), String> {
             task_name.get(),
             task_def.as_raw(),
             TASK_CREATE_OR_UPDATE as LONG,
-            Variant::wrap(&mut BStr::from("NT AUTHORITY\\LocalService")).get(),
+            Variant::<BStr>::wrap(&mut BStr::from("NT AUTHORITY\\LocalService")).get(),
             Variant::null().get(), // password
             TASK_LOGON_SERVICE_ACCOUNT,
-            Variant::wrap(&mut BStr::empty()).get(), // sddl
+            Variant::<BStr>::wrap(&mut BStr::empty()).get(), // sddl
             rt,
         )
     })?;
@@ -177,22 +180,26 @@ pub fn uninstall(task_name: &str) -> Result<(), String> {
 pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<(), String> {
     let task_name = BStr::from(task_name);
 
-    let text = vec![0];
-    /*if args.len() == 1 {
-        text = args[0].encode_wide().collect::<Vec<u16>>();
-    } else {
-        text = vec![0];
-    }*/
+    let args = args
+        .iter()
+        .map(|a| bstr_from_u16(&a.encode_wide().collect::<Vec<u16>>()))
+        .collect::<Vec<_>>();
 
     let maybe_task = get_task(&task_name)?;
     if maybe_task.is_none() {
         return Err(String::from("No such task"));
     }
 
-    getter("Run Task",
-           |rt| unsafe {
-               maybe_task.unwrap().Run(Variant::wrap(&bstr_from_u16(&text)).get(), rt)
-           })?;
+    let mut sa = SafeArray::try_from(args)?;
+    let v = Variant::<SafeArray<_>>::wrap(&mut sa)?;
+    if let VariantValue::StringVector(Ok(v)) = v.value() {
+        for (i, s) in v.iter().enumerate() {
+            println!("{}: {}", i, s);
+        }
+    }
+    getter("Run Task", |rt| unsafe {
+        maybe_task.unwrap().Run(v.get(), rt)
+    })?;
 
     Ok(())
 }

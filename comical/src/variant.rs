@@ -1,17 +1,29 @@
 use std::default::Default;
 use std::marker::PhantomData;
-use winapi::shared::wtypes::{VARENUM, VARIANT_BOOL, VARTYPE, VT_BOOL, VT_BSTR, VT_EMPTY, VT_NULL};
+use std::slice;
+use winapi::shared::wtypes::{
+    BSTR, VARENUM, VARIANT_BOOL, VARTYPE, VT_ARRAY, VT_BOOL, VT_BSTR, VT_EMPTY, VT_NULL,
+};
 use winapi::um::oaidl::{VARIANT_n3, __tagVARIANT, VARIANT};
 
 use bstr::BStr;
+use safearray::{SafeArray, SafeArrayAccess};
 
 pub const VARIANT_TRUE: VARIANT_BOOL = -1;
 pub const VARIANT_FALSE: VARIANT_BOOL = 0;
 
-#[derive(Default)]
 pub struct Variant<'a, T: 'a> {
     inner: VARIANT,
     phantom: PhantomData<&'a T>,
+}
+
+impl<'a, T: 'a> Default for Variant<'a, T> {
+    fn default() -> Self {
+        Variant {
+            inner: Default::default(),
+            phantom: Default::default(),
+        }
+    }
 }
 
 use self::VariantType as VT;
@@ -54,6 +66,7 @@ impl<'a, T> Variant<'a, T> {
     pub fn vartype(&self) -> VariantType {
         match unsafe { self.tag_variant().vt } as VARENUM {
             VT_BSTR => VT::String,
+            x @ _ if x == VT_ARRAY | VT_BSTR => VT::StringVector,
             VT_BOOL => VT::Bool,
             VT_EMPTY => VT::Empty,
             VT_NULL => VT::Null,
@@ -65,6 +78,22 @@ impl<'a, T> Variant<'a, T> {
     pub fn value(&self) -> VariantValue {
         match self.vartype() {
             VT::String => VV::String(unsafe { String::from(&BStr::wrap(*self.n3().bstrVal())) }),
+            VT::StringVector => unsafe {
+                let array = self.n3().parray();
+                assert!((**array).cDims == 1);
+
+                let access = SafeArrayAccess::from_raw(*array);
+                if let Err(err) = access {
+                    return VV::StringVector(Err(err));
+                }
+                let access = access.unwrap();
+                let len = (**array).rgsabound[0].cElements;
+                let sv = slice::from_raw_parts(access.get_data(), len as usize)
+                    .iter()
+                    .map(|ptr| String::from(&BStr::wrap(*ptr)))
+                    .collect();
+                VV::StringVector(Ok(sv))
+            },
             VT::Bool => VV::Bool(unsafe { *self.n3().boolVal() } != VARIANT_FALSE),
             VT::Empty => VV::Empty(),
             VT::Null => VV::Null(),
@@ -127,28 +156,39 @@ impl<'a> Variant<'a, ()> {
 impl<'a> Variant<'a, BStr> {
     #[inline]
     pub fn wrap(s: &'a BStr) -> Self {
-        let mut v: Self = Variant {
-            inner: Default::default(),
-            phantom: Default::default(),
-        };
+        let mut v: Self = Default::default();
         unsafe {
-            let tv = v.tag_variant_mut();
-            *tv.n3.bstrVal_mut() = s.get();
-            tv.vt = VT_BSTR as VARTYPE;
+            *v.n3_mut().bstrVal_mut() = s.get();
+            v.tag_variant_mut().vt = VT_BSTR as VARTYPE;
         }
         v
+    }
+}
+
+impl<'a> Variant<'a, SafeArray<BSTR>> {
+    #[inline]
+    pub fn wrap(array: &'a mut SafeArray<BSTR>) -> Result<Self, String> {
+        let mut v: Self = Default::default();
+        unsafe {
+            *v.n3_mut().parray_mut() = array.get();
+            v.tag_variant_mut().vt = (VT_ARRAY | VT_BSTR) as VARTYPE;
+        }
+        Ok(v)
     }
 }
 
 pub enum VariantType {
     Bool,
     String,
+    StringVector,
     Empty,
     Null,
 }
+
 pub enum VariantValue {
     Bool(bool),
     String(String),
+    StringVector(Result<Vec<String>, String>),
     Empty(),
     Null(),
 }

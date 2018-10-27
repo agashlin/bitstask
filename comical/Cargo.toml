@@ -7,6 +7,7 @@ authors = ["Adam Gashlin <agashlin@mozilla.com>"]
 winapi = { version = "0.3.6", features = ["combaseapi",
                                           "impl-default",
                                           "minwindef",
+                                          "oaidl",
                                           "objbase",
                                           "oleauto",
                                           "rpcdce",

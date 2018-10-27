@@ -3,6 +3,7 @@ extern crate wio;
 
 extern crate comical;
 
+mod task;
 mod task_service;
 
 use comical::com::ComInited;
@@ -44,10 +45,7 @@ fn entry() -> Result<(), String> {
             Err(String::from("uninstall takes no arguments"))
         },
         "run" => task_service::run_on_demand(TASK_NAME, cmd_args),
-        "task" => {
-            // INSERT TASK HERE
-            Ok(())
-        },
+        "task" => task::run(cmd_args),
         _ => Err(String::from("Unknown command.")),
     }
 }

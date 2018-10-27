@@ -36,6 +36,15 @@ where
     }
 }
 
+#[must_use]
+pub fn check_nonnull<T>(descr: &str, ptr: *mut T) -> Result<*mut T, String> {
+    if ptr.is_null() {
+        Err(format!("{} failed", descr))
+    } else {
+        Ok(ptr)
+    }
+}
+
 pub fn getter<I, F>(descr: &str, f: F) -> Result<ComPtr<I>, String>
 where
     I: Interface,
