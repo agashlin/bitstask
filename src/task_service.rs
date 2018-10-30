@@ -3,8 +3,9 @@ use std::os::windows::ffi::OsStrExt;
 use std::ptr::null_mut;
 
 use comical::bstr::{bstr_from_u16, BStr};
-use comical::com::{cast, check_hresult, check_nonzero, getter};
+use comical::com::{cast, check_nonzero, getter};
 use comical::create_instance;
+use comical::handle::check_hresult;
 use comical::safearray::SafeArray;
 use comical::variant::{Variant, VariantValue, VARIANT_FALSE, VARIANT_TRUE};
 

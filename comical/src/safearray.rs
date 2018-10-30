@@ -10,7 +10,8 @@ use winapi::um::oaidl::SAFEARRAY;
 use winapi::um::oleauto::{SafeArrayAccessData, SafeArrayCreateVector, SafeArrayUnaccessData};
 
 use bstr::BStr;
-use com::{check_hresult, check_nonnull};
+use com::check_nonnull;
+use handle::check_hresult;
 
 // TODO: PR for winapi-rs
 extern "system" {

@@ -1,7 +1,7 @@
 use std::ptr::null_mut;
 
 use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_ANONYMOUS};
-use winapi::shared::winerror::{HRESULT, SUCCEEDED};
+use winapi::shared::winerror::HRESULT;
 use winapi::shared::wtypesbase::CLSCTX_INPROC_SERVER;
 use winapi::um::combaseapi::{
     CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoUninitialize,
@@ -11,24 +11,17 @@ use winapi::um::objbase::COINIT_APARTMENTTHREADED;
 use winapi::{Class, Interface};
 use wio::com::ComPtr;
 
-#[must_use]
-pub fn check_hresult(descr: &str, hr: HRESULT) -> Result<HRESULT, String> {
-    if !SUCCEEDED(hr) {
-        Err(format!("{} failed, {:#08x}", descr, hr))
-    } else {
-        Ok(hr)
-    }
-}
+use handle::check_hresult;
 
+// TODO: this belongs somewhere more generic?
 // for functions that set last error and return false (0) on failure
-#[must_use]
 pub fn check_nonzero<T>(descr: &str, rc: T) -> Result<T, String>
 where
     T: Eq,
     T: From<bool>,
 {
     if rc == T::from(false) {
-        Err(format!("{} failed, {:#08x}", descr, unsafe {
+        Err(format!("{} failed, {:#010x}", descr, unsafe {
             GetLastError()
         }))
     } else {
@@ -36,7 +29,6 @@ where
     }
 }
 
-#[must_use]
 pub fn check_nonnull<T>(descr: &str, ptr: *mut T) -> Result<*mut T, String> {
     if ptr.is_null() {
         Err(format!("{} failed", descr))
@@ -61,7 +53,7 @@ where
     I2: Interface,
 {
     i1.cast()
-        .map_err(|hr| format!("QueryInterface {} failed, {:#08x}", i2_name, hr))
+        .map_err(|hr| format!("QueryInterface {} failed, {:#010x}", i2_name, hr))
 }
 
 #[macro_export]

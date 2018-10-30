@@ -8,10 +8,16 @@ winapi = { path = "../winapi-rs" }
 
 [dependencies]
 comical = { path = "./comical" }
+rand = "0.5"
 wio = "0.2"
-winapi = { version = "0.3.6", features = ["minwindef",
+winapi = { version = "0.3.6", features = ["errhandlingapi",
+                                          "fileapi",
+                                          "minwindef",
+                                          "namedpipeapi",
                                           "ntdef",
                                           "processthreadsapi",
+                                          "sddl",
                                           "taskschd",
                                           "winbase",
-                                          "winerror"] }
+                                          "winerror",
+                                          "winnt"] }
