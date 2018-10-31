@@ -1,15 +1,20 @@
+extern crate bincode;
 extern crate comical;
 extern crate rand;
+extern crate serde;
+extern crate serde_derive;
 extern crate winapi;
 extern crate wio;
 
 mod client;
+mod protocol;
 mod task;
 mod task_service;
 
 use std::env;
+use std::fs::File;
+use std::io::Write;
 use std::process;
-use std::ffi::OsString;
 
 use comical::com::ComInited;
 
@@ -49,36 +54,22 @@ fn entry() -> Result<(), String> {
             } else {
                 Err(String::from("uninstall takes no arguments"))
             },
-        "start" =>
+        "bits-start" =>
             if cmd_args.is_empty() {
-                // TODO check if running
+                let guid = client::bits_start(TASK_NAME)?;
 
-                let mut pipe_name = format!("{:016x}{:016x}",
-                                           rand::random::<u64>(),
-                                           rand::random::<u64>());
-                let buf_size = 512usize;
-                let control_pipe = client::create_pipe(&pipe_name, buf_size)?;
-
-                let args: Vec<_> = ["connect", &pipe_name].iter().map(|s| OsString::from(s)).collect();
-                task_service::run_on_demand(TASK_NAME, &args)?;
-
-                client::handle_connection(&control_pipe)
+                println!("success, guid = {:?}", guid);
+                Ok(())
             } else {
                 Err(String::from("start takes no arguments"))
             },
-        /*
-        "stop" =>
-            if cmd_agrs.is_empty() {
-                // TODO
-                // 1. check if running
-                // 2. send stop command
-                // 3. stop task? how to identify the particular task?
-                //task_service::stop(TASK_NAME)
+        "task" =>
+            if let Err(s) = task::run(cmd_args) {
+                File::create("C:\\ProgramData\\fail.log").unwrap().write(s.as_bytes()).unwrap();
+                Err(s)
             } else {
-                Err(String::from("stop takes no arguments"))
+                Ok(())
             },
-        */
-        "task" => task::run(cmd_args),
         _ => Err(String::from("Unknown command.")),
     }
 }
