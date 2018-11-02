@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::mem::{size_of, uninitialized};
 use std::ptr::null_mut;
 use std::result;
@@ -83,7 +83,7 @@ fn create_pipe(name: &str, bufsize: usize) -> Result<Handle> {
 }
 
 fn run_command<'a, T, E>(
-    task_name: &str,
+    task_name: &OsStr,
     cmd: &Command,
     out_buf: &'a mut [u8],
 ) -> Result<result::Result<T, E>>
@@ -132,9 +132,9 @@ where
     }
 }
 
-pub fn bits_start(task_name: &str) -> result::Result<Guid, String> {
+pub fn bits_start(task_name: &OsStr) -> result::Result<Guid, String> {
     let command = Command::Start {
-        url: "http://example.com".to_string(),
+        url: OsString::from("http://example.com"),
         save_path: OsString::from("C:\\ProgramData\\example"),
         update_interval_ms: None,
         log_directory_path: OsString::from("C:\\ProgramData\\example.log"),

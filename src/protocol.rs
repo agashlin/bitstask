@@ -13,7 +13,7 @@ pub type Guid = [u8; size_of::<GUID>()];
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Command {
     Start {
-        url: String,
+        url: OsString,
         save_path: OsString,
         update_interval_ms: Option<u32>,
         log_directory_path: OsString,

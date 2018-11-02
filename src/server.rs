@@ -1,7 +1,5 @@
 use std::ffi::OsString;
-use std::fs::File;
-use std::io::Write;
-use std::mem::uninitialized;
+use std::mem;
 use std::ptr::null_mut;
 
 use bincode::{deserialize, serialize};
@@ -15,6 +13,7 @@ use wio::wide::ToWide;
 use comical::error::{check_nonzero, LabelErrorDWord};
 use comical::handle::Handle;
 
+use bits::{BitsJob, create_download_job};
 use protocol::{Command, StartFailure, StartSuccess, MAX_COMMAND};
 
 pub fn run(args: &[OsString]) -> Result<(), String> {
@@ -46,7 +45,7 @@ pub fn run(args: &[OsString]) -> Result<(), String> {
         }).map_api_rc("SetNamedPipeHandleState")?;
 
         loop {
-            let mut buf: [u8; MAX_COMMAND] = unsafe { uninitialized() };
+            let mut buf: [u8; MAX_COMMAND] = unsafe { mem::uninitialized() };
             let mut bytes_read = 0;
             // TODO better handling of errors, not really a disaster if the pipe closes, and
             // we may want to do something with ERROR_MORE_DATA
@@ -68,25 +67,18 @@ pub fn run(args: &[OsString]) -> Result<(), String> {
                 Ok(Command::Start {
                     url,
                     save_path,
-                    update_interval_ms,
-                    log_directory_path,
+                    ..
                 }) => {
-                    // debug log
-                    File::create(save_path)
-                        .unwrap()
-                        .write(
-                            format!(
-                                "url={}, update_interval_ms={:?}, log_directory_path={}",
-                                url,
-                                update_interval_ms,
-                                log_directory_path.to_string_lossy()
-                            ).as_bytes(),
-                        ).unwrap();
+                    let (guid, job) = create_download_job(&OsString::from("JOBBO"))?;
+                    job.add_file(&url, &save_path)?;
+                    job.resume()?;
+
                     // TODO errors when serializing?
                     let mut serialized_response =
                         serialize::<Result<StartSuccess, StartFailure>>(&Ok(StartSuccess {
-                            guid: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+                            guid: unsafe { mem::transmute(guid) },
                         })).unwrap();
+
                     // TODO also need to do error handling here
                     let mut bytes_written = 0;
                     check_nonzero(unsafe {

@@ -1,8 +1,7 @@
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStrExt;
+use std::ffi::{OsStr, OsString};
 
-use comical::bstr::{bstr_from_u16, BStr};
-use comical::com::{cast, create_instance, getter};
+use comical::bstr::BStr;
+use comical::com::{cast, create_instance_inproc_server, getter};
 use comical::error::{
     check_hresult, check_nonzero, Error, ErrorCode, LabelErrorDWord, LabelErrorHResult, Result,
 };
@@ -22,8 +21,9 @@ use winapi::um::winbase::QueryFullProcessImageNameW;
 use wio::com::ComPtr;
 
 fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)> {
-    let task_service =
-        create_instance::<TaskScheduler, ITaskService>().map_api_hr("CreateInstance")?;
+    let task_service = create_instance_inproc_server::<TaskScheduler, ITaskService>()
+        .map_api_hr("CoCreateInstance")?;
+
     check_hresult(unsafe {
         let null = Variant::null().get();
         task_service.Connect(
@@ -43,7 +43,8 @@ fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)>
 fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     let (_, root_folder) = connect_task_service()?;
 
-    match getter(|task| unsafe { root_folder.GetTask(task_path.get(), task) }).map_api_hr("GetTask")
+    match getter(|task| unsafe { root_folder.GetTask(task_path.get(), task) })
+        .map_api_hr("GetTask")
     {
         Ok(task) => Ok(Some(task)),
         Err(Error::Api("GetTask", ErrorCode::HResult(hr)))
@@ -55,18 +56,20 @@ fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     }
 }
 
-pub fn install(task_name: &str) -> Result<()> {
+pub fn install(task_name: &OsStr) -> Result<()>
+{
     let task_name = BStr::from(task_name);
     let mut image_path = [0u16; MAX_PATH + 1];
+    let mut image_path_size_chars = (image_path.len() - 1) as DWORD;
     check_nonzero(unsafe {
-        let mut image_path_size = (image_path.len() - 1) as DWORD;
         QueryFullProcessImageNameW(
             GetCurrentProcess(),
             0, // dwFlags
             image_path.as_mut_ptr(),
-            &mut image_path_size as *mut _,
+            &mut image_path_size_chars as *mut _,
         )
     }).map_api_rc("QueryFullProcessImageNameW")?;
+    let image_path = &image_path[..image_path_size_chars as usize];
 
     let task_def;
     let root_folder;
@@ -116,7 +119,7 @@ pub fn install(task_name: &str) -> Result<()> {
         let action = getter(|a| action_collection.Create(TASK_ACTION_EXEC, a))
             .map_api_hr("IActionCollection::Create")?;
         let exec_action = cast::<_, IExecAction>(action)?;
-        check_hresult(exec_action.put_Path(bstr_from_u16(&image_path).get()))
+        check_hresult(exec_action.put_Path(BStr::from(image_path).get()))
             .map_api_hr("put_Path")?;
         check_hresult(exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get()))
             .map_api_hr("put_Arguments")?;
@@ -148,7 +151,7 @@ pub fn install(task_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn uninstall(task_name: &str) -> Result<()> {
+pub fn uninstall(task_name: &OsStr) -> Result<()> {
     let task_name = BStr::from(task_name);
     let (_, root_folder) = connect_task_service()?;
     check_hresult(unsafe { root_folder.DeleteTask(task_name.get(), 0) })
@@ -157,12 +160,13 @@ pub fn uninstall(task_name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<()> {
+pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()>
+{
     let task_name = BStr::from(task_name);
 
     let args = args
         .iter()
-        .map(|a| bstr_from_u16(&a.encode_wide().collect::<Vec<u16>>()))
+        .map(|a| BStr::from(a.as_os_str()))
         .collect::<Vec<_>>();
 
     let maybe_task = get_task(&task_name)?;

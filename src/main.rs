@@ -6,12 +6,14 @@ extern crate serde_derive;
 extern crate winapi;
 extern crate wio;
 
+mod bits;
 mod client;
 mod protocol;
-mod task;
 mod task_service;
+mod server;
 
 use std::env;
+use std::ffi::OsString;
 use std::fs::File;
 use std::io::Write;
 use std::process;
@@ -43,23 +45,23 @@ fn entry() -> Result<(), String> {
 
     Ok(match &*args[1].to_string_lossy() {
         "install" => if cmd_args.is_empty() {
-            task_service::install(TASK_NAME)?;
+            task_service::install(&OsString::from(TASK_NAME))?;
         } else {
             return Err("install takes no argments".to_string());
         },
         "uninstall" => if cmd_args.is_empty() {
-            task_service::uninstall(TASK_NAME)?;
+            task_service::uninstall(&OsString::from(TASK_NAME))?;
         } else {
             return Err("uninstall takes no arguments".to_string());
         },
         "bits-start" => if cmd_args.is_empty() {
-            let guid = client::bits_start(TASK_NAME)?;
+            let guid = client::bits_start(&OsString::from(TASK_NAME))?;
 
             println!("success, guid = {:?}", guid);
         } else {
             return Err("start takes no arguments".to_string());
         },
-        "task" => if let Err(s) = task::run(cmd_args) {
+        "task" => if let Err(s) = server::run(cmd_args) {
             // debug log
             File::create("C:\\ProgramData\\fail.log")
                 .unwrap()

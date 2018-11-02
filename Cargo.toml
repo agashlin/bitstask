@@ -13,7 +13,8 @@ rand = { version = "0.5", features = ["i128_support"] }
 serde = "1.0"
 serde_derive = "1.0"
 wio = "0.2"
-winapi = { version = "0.3.6", features = ["errhandlingapi",
+winapi = { version = "0.3.6", features = ["bits",
+                                          "errhandlingapi",
                                           "fileapi",
                                           "guiddef",
                                           "minwindef",

@@ -1,9 +1,9 @@
 use std::ptr::null_mut;
 use std::result;
 
-use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_ANONYMOUS};
+use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE};
 use winapi::shared::winerror::HRESULT;
-use winapi::shared::wtypesbase::CLSCTX_INPROC_SERVER;
+use winapi::shared::wtypesbase::{CLSCTX, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER};
 use winapi::um::combaseapi::{
     CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoUninitialize,
 };
@@ -31,7 +31,7 @@ where
     i1.cast().map_api_hr("QueryInterface")
 }
 
-pub fn create_instance<C, I>() -> result::Result<ComPtr<I>, HRESULT>
+pub fn create_instance<C, I>(ctx: CLSCTX) -> result::Result<ComPtr<I>, HRESULT>
 where
     C: Class,
     I: Interface,
@@ -40,14 +40,31 @@ where
         CoCreateInstance(
             &C::uuidof(),
             null_mut(), // pUnkOuter
-            CLSCTX_INPROC_SERVER,
+            ctx,
             &I::uuidof(),
             interface as *mut *mut _,
         )
     })
 }
 
+pub fn create_instance_local_server<C, I>() -> result::Result<ComPtr<I>, HRESULT>
+where
+    C: Class,
+    I: Interface,
+{
+    create_instance::<C, I>(CLSCTX_LOCAL_SERVER)
+}
+pub fn create_instance_inproc_server<C, I>() -> result::Result<ComPtr<I>, HRESULT>
+where
+    C: Class,
+    I: Interface,
+{
+    create_instance::<C, I>(CLSCTX_INPROC_SERVER)
+}
+
 /// uninitialize COM when this drops
+// TODO: I had the idea to require passing a ref to this into any other COM stuff, but it seems
+// really cumbersome.
 pub struct ComInited {
     _init_only: (),
 }
@@ -65,7 +82,7 @@ impl ComInited {
                 null_mut(), // asAuthSvc
                 null_mut(), // pReserved1
                 RPC_C_AUTHN_LEVEL_DEFAULT,
-                RPC_C_IMP_LEVEL_ANONYMOUS,
+                RPC_C_IMP_LEVEL_IMPERSONATE, //RPC_C_IMP_LEVEL_ANONYMOUS,
                 null_mut(), // pAuthList
                 0,          // dwCapabilities
                 null_mut(), // pReserved3

@@ -2,7 +2,9 @@ use std::fmt;
 use std::mem;
 use std::ptr;
 
-use winapi::shared::basetsd::UINT32;
+use std::ffi::OsStr;
+use std::os::windows::ffi::OsStrExt;
+
 use winapi::shared::minwindef::UINT;
 use winapi::shared::wtypes::BSTR;
 use winapi::shared::wtypesbase::OLECHAR;
@@ -23,16 +25,29 @@ impl<'a> From<&'a str> for BStr {
         }
         let len = s16.len();
         let slice: &[u16] = &s16;
-        let bstr = unsafe { SysAllocStringLen(slice as *const _ as *const OLECHAR, len as UINT32) };
+        let bstr = unsafe {
+            SysAllocStringLen(slice as *const _ as *const OLECHAR, len as UINT) };
         BStr(bstr)
     }
 }
 
-// TODO: there's probably a good trait to attach this to
-pub fn bstr_from_u16(s: &[u16]) -> BStr {
-    let len = s.len();
-    let bstr = unsafe { SysAllocStringLen(s as *const _ as *const OLECHAR, len as UINT) };
-    unsafe { BStr::wrap(bstr) }
+impl<'a> From<&'a OsStr> for BStr {
+    fn from(s: &'a OsStr) -> Self {
+        let s16: Vec<u16> = s.encode_wide().collect();
+        let len = s16.len();
+        let bstr = unsafe {
+            SysAllocStringLen(s16.as_ptr() as *const OLECHAR, len as UINT) };
+        BStr(bstr)
+    }
+}
+
+impl<'a> From<&'a [u16]> for BStr {
+    fn from(s: &'a [u16]) -> Self {
+        let len = s.len();
+        let bstr = unsafe {
+            SysAllocStringLen(s.as_ptr() as *const OLECHAR, len as UINT) };
+        BStr(bstr)
+    }
 }
 
 impl<'a> From<&'a BStr> for String {
