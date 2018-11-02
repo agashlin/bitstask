@@ -10,8 +10,7 @@ use winapi::um::oaidl::SAFEARRAY;
 use winapi::um::oleauto::{SafeArrayAccessData, SafeArrayCreateVector, SafeArrayUnaccessData};
 
 use bstr::BStr;
-use com::check_nonnull;
-use handle::check_hresult;
+use error::{LabelErrorHResult, LabelErrorNone, Result, check_nonnull_no_error_code, check_hresult};
 
 // TODO: PR for winapi-rs
 extern "system" {
@@ -36,16 +35,16 @@ impl<T: Copy + 'static> Drop for SafeArray<T> {
 }
 
 impl SafeArray<BSTR> {
-    pub fn try_new(elements: ULONG) -> Result<Self, String> {
+    pub fn try_new(elements: ULONG) -> Result<Self> {
         Ok(SafeArray {
-            raw: check_nonnull("SafeArrayCreateVector", unsafe {
+            raw: check_nonnull_no_error_code(unsafe {
                 SafeArrayCreateVector(VT_BSTR as VARTYPE, 0, elements)
-            })?,
+            }).map_api("SafeArrayCreateVector")?,
             phantom: Default::default(),
         })
     }
 
-    pub fn try_from(vec: Vec<BStr>) -> Result<Self, String> {
+    pub fn try_from(vec: Vec<BStr>) -> Result<Self> {
         let mut array = Self::try_new(vec.len() as ULONG)?;
         {
             let access = SafeArrayAccess::new(&mut array)?;
@@ -64,23 +63,22 @@ pub struct SafeArrayAccess<'a, T: Copy + 'static> {
 }
 
 impl<'a, T: Copy + 'static> SafeArrayAccess<'a, T> {
-    unsafe fn getter(array: *mut SAFEARRAY) -> Result<*mut T, String> {
+    unsafe fn getter(array: *mut SAFEARRAY) -> Result<*mut T> {
         let mut data = null_mut();
         check_hresult(
-            "SafeArrayAccessData",
             SafeArrayAccessData(array, &mut data as *mut *mut T as *mut *mut _),
-        )?;
+        ).map_api_hr("SafeArrayAccessData")?;
         Ok(data)
     }
 
-    pub fn new(array: &'a mut SafeArray<T>) -> Result<Self, String> {
+    pub fn new(array: &'a mut SafeArray<T>) -> Result<Self> {
         Ok(SafeArrayAccess {
             data: unsafe { Self::getter(array.get()) }?,
             array: Some(array),
         })
     }
 
-    pub unsafe fn from_raw(array: *mut SAFEARRAY) -> Result<Self, String> {
+    pub unsafe fn from_raw(array: *mut SAFEARRAY) -> Result<Self> {
         Ok(SafeArrayAccess {
             array: None,
             data: Self::getter(array)?,
@@ -95,6 +93,7 @@ impl<'a, T: Copy + 'static> SafeArrayAccess<'a, T> {
 impl<'a, T: Copy + 'static> Drop for SafeArrayAccess<'a, T> {
     fn drop(&mut self) {
         if let Some(ref mut array) = self.array {
+            // TODO: If this fails while we're dropping is there any recourse?
             unsafe { SafeArrayUnaccessData(array.get()) };
         }
     }

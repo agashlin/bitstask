@@ -1,4 +1,5 @@
 use std::ptr::null_mut;
+use std::result;
 
 use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_ANONYMOUS};
 use winapi::shared::winerror::HRESULT;
@@ -6,74 +7,36 @@ use winapi::shared::wtypesbase::CLSCTX_INPROC_SERVER;
 use winapi::um::combaseapi::{
     CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoUninitialize,
 };
-use winapi::um::errhandlingapi::GetLastError;
 use winapi::um::objbase::COINIT_APARTMENTTHREADED;
 use winapi::{Class, Interface};
 use wio::com::ComPtr;
 
-use handle::check_hresult;
+use error::{LabelErrorHResult, Result, check_hresult};
 
-// TODO: this belongs somewhere more generic?
-// for functions that set last error and return false (0) on failure
-pub fn check_nonzero<T>(descr: &str, rc: T) -> Result<T, String>
-where
-    T: Eq,
-    T: From<bool>,
-{
-    if rc == T::from(false) {
-        Err(format!("{} failed, {:#010x}", descr, unsafe {
-            GetLastError()
-        }))
-    } else {
-        Ok(rc)
-    }
-}
-
-pub fn check_nonnull<T>(descr: &str, ptr: *mut T) -> Result<*mut T, String> {
-    if ptr.is_null() {
-        Err(format!("{} failed", descr))
-    } else {
-        Ok(ptr)
-    }
-}
-
-pub fn getter<I, F>(descr: &str, f: F) -> Result<ComPtr<I>, String>
+pub fn getter<I, F>(closure: F) -> result::Result<ComPtr<I>, HRESULT>
 where
     I: Interface,
     F: FnOnce(*mut *mut I) -> HRESULT,
 {
     let mut interface: *mut I = null_mut();
-    check_hresult(descr, f(&mut interface as *mut *mut I))?;
+    check_hresult(closure(&mut interface as *mut *mut I))?;
     Ok(unsafe { ComPtr::from_raw(interface) })
 }
 
-pub fn cast<I1, I2>(i1: ComPtr<I1>, i2_name: &str) -> Result<ComPtr<I2>, String>
+pub fn cast<I1, I2>(i1: ComPtr<I1>) -> Result<ComPtr<I2>>
 where
     I1: Interface,
     I2: Interface,
 {
-    i1.cast()
-        .map_err(|hr| format!("QueryInterface {} failed, {:#010x}", i2_name, hr))
+    i1.cast().map_api_hr("QueryInterface")
 }
 
-#[macro_export]
-macro_rules! create_instance {
-    ($class:ident, $interface:ident) => {
-        $crate::com::create_instance::<$class, $interface>(concat!(
-            "CoCreateInstance of ",
-            stringify!($class),
-            " as ",
-            stringify!($interface)
-        ))
-    };
-}
-
-pub fn create_instance<C, I>(descr: &str) -> Result<ComPtr<I>, String>
+pub fn create_instance<C, I>() -> result::Result<ComPtr<I>, HRESULT>
 where
     C: Class,
     I: Interface,
 {
-    getter(descr, |interface| unsafe {
+    getter(|interface| unsafe {
         CoCreateInstance(
             &C::uuidof(),
             null_mut(), // pUnkOuter
@@ -84,18 +47,18 @@ where
     })
 }
 
-// uninitialize COM when this drops
+/// uninitialize COM when this drops
 pub struct ComInited {
     _init_only: (),
 }
 
 impl ComInited {
-    pub fn init() -> Result<Self, String> {
-        check_hresult("CoInitializeEx", unsafe {
+    pub fn init() -> Result<Self> {
+        check_hresult(unsafe {
             CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED)
-        })?;
+        }).map_api_hr("CoInitializeEx")?;
 
-        check_hresult("CoInitializeSecurity", unsafe {
+        check_hresult(unsafe {
             CoInitializeSecurity(
                 null_mut(), // pSecDesc
                 -1,         // cAuthSvc
@@ -107,7 +70,7 @@ impl ComInited {
                 0,          // dwCapabilities
                 null_mut(), // pReserved3
             )
-        })?;
+        }).map_api_hr("CoInitializeSecurity")?;
 
         Ok(ComInited { _init_only: () })
     }

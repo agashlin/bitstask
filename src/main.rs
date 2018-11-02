@@ -41,35 +41,32 @@ fn entry() -> Result<(), String> {
 
     let cmd_args = &args[2..];
 
-    match &*args[1].to_string_lossy() {
-        "install" =>
-            if cmd_args.is_empty() {
-                task_service::install(TASK_NAME)
-            } else {
-                Err(String::from("install takes no argments"))
-            },
-        "uninstall" =>
-            if cmd_args.is_empty() {
-                task_service::uninstall(TASK_NAME)
-            } else {
-                Err(String::from("uninstall takes no arguments"))
-            },
-        "bits-start" =>
-            if cmd_args.is_empty() {
-                let guid = client::bits_start(TASK_NAME)?;
+    Ok(match &*args[1].to_string_lossy() {
+        "install" => if cmd_args.is_empty() {
+            task_service::install(TASK_NAME)?;
+        } else {
+            return Err("install takes no argments".to_string());
+        },
+        "uninstall" => if cmd_args.is_empty() {
+            task_service::uninstall(TASK_NAME)?;
+        } else {
+            return Err("uninstall takes no arguments".to_string());
+        },
+        "bits-start" => if cmd_args.is_empty() {
+            let guid = client::bits_start(TASK_NAME)?;
 
-                println!("success, guid = {:?}", guid);
-                Ok(())
-            } else {
-                Err(String::from("start takes no arguments"))
-            },
-        "task" =>
-            if let Err(s) = task::run(cmd_args) {
-                File::create("C:\\ProgramData\\fail.log").unwrap().write(s.as_bytes()).unwrap();
-                Err(s)
-            } else {
-                Ok(())
-            },
-        _ => Err(String::from("Unknown command.")),
-    }
+            println!("success, guid = {:?}", guid);
+        } else {
+            return Err("start takes no arguments".to_string());
+        },
+        "task" => if let Err(s) = task::run(cmd_args) {
+            // debug log
+            File::create("C:\\ProgramData\\fail.log")
+                .unwrap()
+                .write(s.to_string().as_bytes())
+                .unwrap();
+            return Err(s);
+        },
+        _ => return Err("Unknown command.".to_string()),
+    })
 }

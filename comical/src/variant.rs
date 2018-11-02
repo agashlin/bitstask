@@ -4,7 +4,7 @@ use std::slice;
 use winapi::shared::wtypes::{
     BSTR, VARENUM, VARIANT_BOOL, VARTYPE, VT_ARRAY, VT_BOOL, VT_BSTR, VT_EMPTY, VT_NULL,
 };
-use winapi::um::oaidl::{VARIANT_n3, __tagVARIANT, VARIANT};
+use winapi::um::oaidl::{SAFEARRAY, VARIANT_n3, __tagVARIANT, VARIANT};
 
 use bstr::BStr;
 use safearray::{SafeArray, SafeArrayAccess};
@@ -74,26 +74,34 @@ impl<'a, T> Variant<'a, T> {
         }
     }
 
+    unsafe fn build_string(bstr: &BSTR) -> String {
+        String::from(&BStr::wrap(*bstr))
+    }
+
+    unsafe fn build_string_vector(array: &*mut SAFEARRAY) -> Result<Vec<String>, String> {
+        assert!((**array).cDims == 1);
+        // TODO: is there anything to be done with lower bound?
+
+        let access = SafeArrayAccess::from_raw(*array);
+        if let Err(err) = access {
+            return Err(err.to_string());
+        }
+        let access = access.unwrap();
+        let len = (**array).rgsabound[0].cElements;
+        let sv = slice::from_raw_parts(access.get_data(), len as usize)
+            .iter()
+            .map(|ptr| String::from(&BStr::wrap(*ptr)))
+            .collect();
+
+        Ok(sv)
+    }
+
     ///
     pub fn value(&self) -> VariantValue {
         match self.vartype() {
-            VT::String => VV::String(unsafe { String::from(&BStr::wrap(*self.n3().bstrVal())) }),
-            VT::StringVector => unsafe {
-                let array = self.n3().parray();
-                assert!((**array).cDims == 1);
-
-                let access = SafeArrayAccess::from_raw(*array);
-                if let Err(err) = access {
-                    return VV::StringVector(Err(err));
-                }
-                let access = access.unwrap();
-                let len = (**array).rgsabound[0].cElements;
-                let sv = slice::from_raw_parts(access.get_data(), len as usize)
-                    .iter()
-                    .map(|ptr| String::from(&BStr::wrap(*ptr)))
-                    .collect();
-                VV::StringVector(Ok(sv))
-            },
+            VT::String => VV::String(unsafe { Self::build_string(self.n3().bstrVal()) }),
+            VT::StringVector =>
+                VV::StringVector(unsafe { Self::build_string_vector(self.n3().parray()) }),
             VT::Bool => VV::Bool(unsafe { *self.n3().boolVal() } != VARIANT_FALSE),
             VT::Empty => VV::Empty(),
             VT::Null => VV::Null(),
@@ -139,17 +147,17 @@ impl<'a> Variant<'a, ()> {
         var
     }
 
-    fn default_of_type(t: VARENUM) -> Result<Self, ()> {
+    fn default_of_type(t: VARENUM) -> Option<Self> {
         // What types are ok to initialize to 0 (the default of VARIANT)?
         match t {
             VT_BOOL | VT_EMPTY | VT_NULL => {}
-            _ => return Err(()),
+            _ => return None,
         };
         let mut v: Self = Default::default();
         unsafe {
             v.tag_variant_mut().vt = t as VARTYPE;
         }
-        Ok(v)
+        Some(v)
     }
 }
 
@@ -167,13 +175,13 @@ impl<'a> Variant<'a, BStr> {
 
 impl<'a> Variant<'a, SafeArray<BSTR>> {
     #[inline]
-    pub fn wrap(array: &'a mut SafeArray<BSTR>) -> Result<Self, String> {
+    pub fn wrap(array: &'a mut SafeArray<BSTR>) -> Self {
         let mut v: Self = Default::default();
         unsafe {
             *v.n3_mut().parray_mut() = array.get();
             v.tag_variant_mut().vt = (VT_ARRAY | VT_BSTR) as VARTYPE;
         }
-        Ok(v)
+        v
     }
 }
 

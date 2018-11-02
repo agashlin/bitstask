@@ -8,9 +8,9 @@ use winapi::shared::winerror::HRESULT;
 pub const MAX_COMMAND: usize = 2048;
 pub const MAX_RESPONSE: usize = 128;
 
-pub type Guid= [u8; size_of::<GUID>()];
+pub type Guid = [u8; size_of::<GUID>()];
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Command {
     Start {
         url: String,
@@ -21,37 +21,37 @@ pub enum Command {
     Monitor {
         guid: [u8; size_of::<GUID>()],
         update_interval_ms: Option<u32>,
-        log_directory_path: OsString
+        log_directory_path: OsString,
     },
     Cancel {
         guid: [u8; size_of::<GUID>()],
     },
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct StartSuccess {
     pub guid: [u8; size_of::<GUID>()],
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum StartFailure {
     BitsFailure(HRESULT),
     GeneralFailure(String),
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct MonitorSuccess();
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum MonitorFailure {
     BitsFailure(HRESULT),
     GeneralFailure(String),
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct CancelSuccess();
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum CancelFailure {
     BitsFailure(HRESULT),
     GeneralFailure(String),

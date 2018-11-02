@@ -1,11 +1,11 @@
 use std::ffi::OsString;
 use std::os::windows::ffi::OsStrExt;
-use std::ptr::null_mut;
 
 use comical::bstr::{bstr_from_u16, BStr};
-use comical::com::{cast, check_nonzero, getter};
-use comical::create_instance;
-use comical::handle::check_hresult;
+use comical::com::{cast, create_instance, getter};
+use comical::error::{
+    check_hresult, check_nonzero, Error, ErrorCode, LabelErrorDWord, LabelErrorHResult, Result,
+};
 use comical::safearray::SafeArray;
 use comical::variant::{Variant, VariantValue, VARIANT_FALSE, VARIANT_TRUE};
 
@@ -21,9 +21,10 @@ use winapi::um::taskschd::{
 use winapi::um::winbase::QueryFullProcessImageNameW;
 use wio::com::ComPtr;
 
-fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>), String> {
-    let task_service = create_instance!(TaskScheduler, ITaskService)?;
-    check_hresult("ITaskService::Connect", unsafe {
+fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)> {
+    let task_service =
+        create_instance::<TaskScheduler, ITaskService>().map_api_hr("CreateInstance")?;
+    check_hresult(unsafe {
         let null = Variant::null().get();
         task_service.Connect(
             null, // serverName
@@ -31,31 +32,33 @@ fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>),
             null, // domain
             null, // password
         )
-    })?;
-    let root_folder = getter("Get Task Scheduler root folder", |root_folder| unsafe {
+    }).map_api_hr("Connect")?;
+    let root_folder = getter(|root_folder| unsafe {
         task_service.GetFolder(BStr::from("\\").get(), root_folder)
-    })?;
+    }).map_api_hr("GetFolder")?;
 
     Ok((task_service, root_folder))
 }
 
-fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>, String> {
-    let root_folder = connect_task_service()?.1;
-    let mut task = null_mut();
+fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
+    let (_, root_folder) = connect_task_service()?;
 
-    let hr = unsafe { root_folder.GetTask(task_path.get(), &mut task as *mut *mut _) };
-    if hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) {
-        Ok(None)
-    } else {
-        check_hresult("GetTask", hr)?;
-        Ok(Some(unsafe { ComPtr::from_raw(task) }))
+    match getter(|task| unsafe { root_folder.GetTask(task_path.get(), task) }).map_api_hr("GetTask")
+    {
+        Ok(task) => Ok(Some(task)),
+        Err(Error::Api("GetTask", ErrorCode::HResult(hr)))
+            if hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) =>
+        {
+            Ok(None)
+        }
+        Err(e) => Err(e),
     }
 }
 
-pub fn install(task_name: &str) -> Result<(), String> {
+pub fn install(task_name: &str) -> Result<()> {
     let task_name = BStr::from(task_name);
     let mut image_path = [0u16; MAX_PATH + 1];
-    check_nonzero("QueryFullProcessImageNameW", unsafe {
+    check_nonzero(unsafe {
         let mut image_path_size = (image_path.len() - 1) as DWORD;
         QueryFullProcessImageNameW(
             GetCurrentProcess(),
@@ -63,7 +66,7 @@ pub fn install(task_name: &str) -> Result<(), String> {
             image_path.as_mut_ptr(),
             &mut image_path_size as *mut _,
         )
-    })?;
+    }).map_api_rc("QueryFullProcessImageNameW")?;
 
     let task_def;
     let root_folder;
@@ -74,75 +77,52 @@ pub fn install(task_name: &str) -> Result<(), String> {
         // If the same task exists, remove it. Allowed to fail.
         unsafe { root_folder.DeleteTask(task_name.get(), 0) };
 
-        task_def = getter("Create new task", |task_def| unsafe {
+        task_def = getter(|task_def| unsafe {
             task_service.NewTask(
                 0, // flags (reserved)
                 task_def,
             )
-        })?;
+        }).map_api_hr("NewTask")?;
     }
 
     {
-        let reg_info = getter("get_RegistrationInfo", |info| unsafe {
-            task_def.get_RegistrationInfo(info)
-        })?;
+        let reg_info = getter(|info| unsafe { task_def.get_RegistrationInfo(info) })
+            .map_api_hr("get_RegistrationInfo")?;
 
-        check_hresult("put_Author", unsafe {
-            reg_info.put_Author(BStr::from("Mozilla").get())
-        })?;
+        check_hresult(unsafe { reg_info.put_Author(BStr::from("Mozilla").get()) })
+            .map_api_hr("put_Author")?;
     }
 
-    {
-        let settings = getter("get_Settings", |s| unsafe { task_def.get_Settings(s) })?;
+    unsafe {
+        let settings = getter(|s| task_def.get_Settings(s)).map_api_hr("get_Settings")?;
+        check_hresult(settings.put_MultipleInstances(TASK_INSTANCES_IGNORE_NEW))
+            .map_api_hr("put_MultipleInstances")?;
+        check_hresult(settings.put_AllowDemandStart(VARIANT_TRUE))
+            .map_api_hr("put_AllowDemandStart")?;
+        check_hresult(settings.put_RunOnlyIfIdle(VARIANT_FALSE)).map_api_hr("put_RunOnlyIfIdle")?;
+        check_hresult(settings.put_DisallowStartIfOnBatteries(VARIANT_FALSE))
+            .map_api_hr("put_DisallowStartIfOnBatteries")?;
+        check_hresult(settings.put_StopIfGoingOnBatteries(VARIANT_FALSE))
+            .map_api_hr("put_StopIfGoingOnBatteries")?;
 
-        check_hresult("put_MultipleInstances", unsafe {
-            settings.put_MultipleInstances(TASK_INSTANCES_IGNORE_NEW)
-        })?;
-
-        check_hresult("put_AllowDemandStart", unsafe {
-            settings.put_AllowDemandStart(VARIANT_TRUE)
-        })?;
-
-        check_hresult("put_RunOnlyIfIdle", unsafe {
-            settings.put_RunOnlyIfIdle(VARIANT_FALSE)
-        })?;
-
-        check_hresult("put_DisallowStartIfOnBatteries", unsafe {
-            settings.put_DisallowStartIfOnBatteries(VARIANT_FALSE)
-        })?;
-
-        check_hresult("put_StopIfGoingOnBatteries", unsafe {
-            settings.put_StopIfGoingOnBatteries(VARIANT_FALSE)
-        })?;
-
-        let idle_settings = getter("get_IdleSettings", |s| unsafe {
-            settings.get_IdleSettings(s)
-        })?;
-
-        check_hresult("put_StopOnIdleEnd", unsafe {
-            idle_settings.put_StopOnIdleEnd(VARIANT_FALSE)
-        })?;
+        let idle_settings =
+            getter(|s| settings.get_IdleSettings(s)).map_api_hr("get_IdleSettings")?;
+        check_hresult(idle_settings.put_StopOnIdleEnd(VARIANT_FALSE))
+            .map_api_hr("put_StopOnIdleEnd")?;
     }
 
-    {
-        let action_collection = getter("get_Actions", |ac| unsafe { task_def.get_Actions(ac) })?;
-
-        let action = getter("Create Action", |a| unsafe {
-            action_collection.Create(TASK_ACTION_EXEC, a)
-        })?;
-
-        let exec_action = cast::<_, IExecAction>(action, "IExecAction")?;
-
-        check_hresult("Set exec action path", unsafe {
-            exec_action.put_Path(bstr_from_u16(&image_path).get())
-        })?;
-
-        check_hresult("Set exec action args", unsafe {
-            exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get())
-        })?;
+    unsafe {
+        let action_collection = getter(|ac| task_def.get_Actions(ac)).map_api_hr("get_Actions")?;
+        let action = getter(|a| action_collection.Create(TASK_ACTION_EXEC, a))
+            .map_api_hr("IActionCollection::Create")?;
+        let exec_action = cast::<_, IExecAction>(action)?;
+        check_hresult(exec_action.put_Path(bstr_from_u16(&image_path).get()))
+            .map_api_hr("put_Path")?;
+        check_hresult(exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get()))
+            .map_api_hr("put_Arguments")?;
     }
 
-    let registered_task = getter("RegisterTaskDefinition", |rt| unsafe {
+    let registered_task = getter(|rt| unsafe {
         root_folder.RegisterTaskDefinition(
             task_name.get(),
             task_def.as_raw(),
@@ -153,32 +133,31 @@ pub fn install(task_name: &str) -> Result<(), String> {
             Variant::<BStr>::wrap(&mut BStr::empty()).get(), // sddl
             rt,
         )
-    })?;
+    }).map_api_hr("RegisterTaskDefinition")?;
 
     // Allow read and execute access by builtin users, this is required to Get the task and
     // call Run on it
     // TODO: should this just be in sddl above? I think that ends up adding BU as principal?
-    check_hresult("SetSecurityDescriptor", unsafe {
+    check_hresult(unsafe {
         registered_task.SetSecurityDescriptor(
             BStr::from("D:(A;;GRGX;;;BU)").get(),
             TASK_DONT_ADD_PRINCIPAL_ACE as LONG,
         )
-    })?;
+    }).map_api_hr("SetSecurityDescriptor")?;
 
     Ok(())
 }
 
-pub fn uninstall(task_name: &str) -> Result<(), String> {
+pub fn uninstall(task_name: &str) -> Result<()> {
     let task_name = BStr::from(task_name);
     let (_, root_folder) = connect_task_service()?;
-    check_hresult("DeleteTask", unsafe {
-        root_folder.DeleteTask(task_name.get(), 0)
-    })?;
+    check_hresult(unsafe { root_folder.DeleteTask(task_name.get(), 0) })
+        .map_api_hr("DeleteTask")?;
 
     Ok(())
 }
 
-pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<(), String> {
+pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<()> {
     let task_name = BStr::from(task_name);
 
     let args = args
@@ -188,19 +167,19 @@ pub fn run_on_demand(task_name: &str, args: &[OsString]) -> Result<(), String> {
 
     let maybe_task = get_task(&task_name)?;
     if maybe_task.is_none() {
-        return Err(String::from("No such task"));
+        return Err(Error::Message("No such task".to_string()));
     }
 
+    // DEBUG
     let mut sa = SafeArray::try_from(args)?;
-    let v = Variant::<SafeArray<_>>::wrap(&mut sa)?;
+    let v = Variant::<SafeArray<_>>::wrap(&mut sa);
     if let VariantValue::StringVector(Ok(v)) = v.value() {
         for (i, s) in v.iter().enumerate() {
             println!("{}: {}", i, s);
         }
     }
-    getter("Run Task", |rt| unsafe {
-        maybe_task.unwrap().Run(v.get(), rt)
-    })?;
+
+    getter(|rt| unsafe { maybe_task.unwrap().Run(v.get(), rt) }).map_api_hr("Run")?;
 
     Ok(())
 }
