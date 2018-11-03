@@ -19,9 +19,12 @@ use winapi::um::winbase::{
 use wio::wide::ToWide;
 
 use comical::error::{check_nonzero, Error, LabelErrorDWord, Result};
+use comical::guid::Guid;
 use comical::handle::Handle;
 
-use protocol::{Command, Guid, StartFailure, StartSuccess, MAX_COMMAND, MAX_RESPONSE};
+use protocol::{
+    CancelFailure, CancelSuccess, Command, StartFailure, StartSuccess, MAX_COMMAND, MAX_RESPONSE,
+};
 use task_service::run_on_demand;
 
 // TODO move to utility module?
@@ -124,6 +127,8 @@ where
     }).map_api_rc("TransactNamedPipe")?;
     println!("transacted");
 
+    println!("{:?}", &out_buf[..bytes_read as usize]);
+
     match deserialize::<result::Result<T, E>>(&out_buf[..bytes_read as usize]) {
         Err(e) => Err(Error::Message(
             format!("deserialize failed {}", e).to_string(),
@@ -132,6 +137,7 @@ where
     }
 }
 
+// TODO: monitoring, second pipe!
 pub fn bits_start(task_name: &OsStr) -> result::Result<Guid, String> {
     let command = Command::Start {
         url: OsString::from("http://example.com"),
@@ -141,8 +147,20 @@ pub fn bits_start(task_name: &OsStr) -> result::Result<Guid, String> {
     };
     let mut out_buf: [u8; MAX_RESPONSE] = unsafe { uninitialized() };
     let result = run_command::<StartSuccess, StartFailure>(task_name, &command, &mut out_buf)?;
+    println!("{:?}", result);
     match result {
         Ok(r) => Ok(r.guid),
+        Err(e) => Err(format!("error from server {:?}", e)),
+    }
+}
+
+pub fn bits_cancel(task_name: &OsStr, guid: Guid) -> result::Result<(), String> {
+    let command = Command::Cancel { guid };
+    let mut out_buf: [u8; MAX_RESPONSE] = unsafe { uninitialized() };
+    let result = run_command::<CancelSuccess, CancelFailure>(task_name, &command, &mut out_buf)?;
+    println!("{:?}", result);
+    match result {
+        Ok(_) => Ok(()),
         Err(e) => Err(format!("error from server {:?}", e)),
     }
 }

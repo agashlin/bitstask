@@ -16,8 +16,7 @@ impl Handle {
     /// `h` should be the only copy of the handle. `GetLastError` is called to
     /// generate an error message, so the last Windows API called should have been what produced
     /// the invalid handle.
-    pub unsafe fn wrap_handle(h: HANDLE) -> std::result::Result<Handle, DWORD>
-    {
+    pub unsafe fn wrap_handle(h: HANDLE) -> std::result::Result<Handle, DWORD> {
         if h == INVALID_HANDLE_VALUE {
             Err(GetLastError())
         } else {
@@ -35,6 +34,8 @@ impl Deref for Handle {
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        unsafe { CloseHandle(self.0 ); }
+        unsafe {
+            CloseHandle(self.0);
+        }
     }
 }

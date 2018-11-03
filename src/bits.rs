@@ -2,10 +2,14 @@ use std::ffi::OsStr;
 use std::mem;
 
 use comical::com::{create_instance_local_server, getter};
-use comical::error::{LabelErrorHResult, Result, check_hresult};
-use winapi::shared::guiddef::GUID;
+use comical::error::{check_hresult, LabelErrorHResult, Result};
+use comical::guid::Guid;
 use winapi::shared::minwindef::ULONG;
-use winapi::um::bits::{BackgroundCopyManager, BG_ERROR_CONTEXT, BG_JOB_PROGRESS, BG_JOB_STATE, BG_JOB_STATE_ERROR, BG_JOB_STATE_TRANSIENT_ERROR, BG_JOB_TYPE_DOWNLOAD, IBackgroundCopyJob, IBackgroundCopyManager};
+use winapi::um::bits::{
+    BackgroundCopyManager, IBackgroundCopyJob, IBackgroundCopyManager, BG_ERROR_CONTEXT,
+    BG_JOB_PROGRESS, BG_JOB_STATE, BG_JOB_STATE_ERROR, BG_JOB_STATE_TRANSIENT_ERROR,
+    BG_JOB_TYPE_DOWNLOAD,
+};
 use winapi::um::winnt::HRESULT;
 use wio::com::ComPtr;
 use wio::wide::ToWide;
@@ -15,8 +19,7 @@ pub fn connect_bcm() -> Result<ComPtr<IBackgroundCopyManager>> {
         .map_api_hr("CoCreateInstance")
 }
 
-pub fn create_download_job(display_name: &OsStr) -> Result<(GUID, ComPtr<IBackgroundCopyJob>)>
-{
+pub fn create_download_job(display_name: &OsStr) -> Result<(Guid, ComPtr<IBackgroundCopyJob>)> {
     let bcm = connect_bcm()?;
     let mut guid = unsafe { mem::uninitialized() };
     let job = getter(|job| unsafe {
@@ -25,13 +28,14 @@ pub fn create_download_job(display_name: &OsStr) -> Result<(GUID, ComPtr<IBackgr
             BG_JOB_TYPE_DOWNLOAD,
             &mut guid,
             job,
-            )}).map_api_hr("IBackgroundCopyManager::CreateJob")?;
-    Ok((guid, job))
+        )
+    }).map_api_hr("IBackgroundCopyManager::CreateJob")?;
+    Ok((Guid(guid), job))
 }
 
-pub fn get_job(guid: &GUID) -> Result<ComPtr<IBackgroundCopyJob>> {
+pub fn get_job(guid: &Guid) -> Result<ComPtr<IBackgroundCopyJob>> {
     let bcm = connect_bcm()?;
-    getter(|job| unsafe { bcm.GetJob(guid, job) }).map_api_hr("IBackgroundCopyManager::GetJob")
+    getter(|job| unsafe { bcm.GetJob(&guid.0, job) }).map_api_hr("IBackgroundCopyManager::GetJob")
 }
 
 pub trait BitsJob {
@@ -56,13 +60,13 @@ pub struct BitsJobStatus {
 }
 
 impl BitsJob for ComPtr<IBackgroundCopyJob> {
-    fn add_file(&self, remote_url: &OsStr, local_file: &OsStr) -> Result<()>
-    {
+    fn add_file(&self, remote_url: &OsStr, local_file: &OsStr) -> Result<()> {
         check_hresult(unsafe {
             self.AddFile(
                 remote_url.to_wide_null().as_ptr(),
                 local_file.to_wide_null().as_ptr(),
-            )}).map_api_hr("IBackgroundCopyJob::AddFile")?;
+            )
+        }).map_api_hr("IBackgroundCopyJob::AddFile")?;
         Ok(())
     }
 
@@ -118,7 +122,7 @@ impl BitsJob for ComPtr<IBackgroundCopyJob> {
                 })
             } else {
                 None
-            }
+            },
         })
     }
 }

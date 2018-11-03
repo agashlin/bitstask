@@ -14,7 +14,7 @@ use winapi::shared::winerror::{ERROR_FILE_NOT_FOUND, HRESULT_FROM_WIN32};
 use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::taskschd::{
     IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC,
-    TASK_CREATE_OR_UPDATE, TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_IGNORE_NEW,
+    TASK_CREATE_OR_UPDATE, TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_PARALLEL,
     TASK_LOGON_SERVICE_ACCOUNT,
 };
 use winapi::um::winbase::QueryFullProcessImageNameW;
@@ -32,10 +32,10 @@ fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)>
             null, // domain
             null, // password
         )
-    }).map_api_hr("Connect")?;
+    }).map_api_hr("ITaskService::Connect")?;
     let root_folder = getter(|root_folder| unsafe {
         task_service.GetFolder(BStr::from("\\").get(), root_folder)
-    }).map_api_hr("GetFolder")?;
+    }).map_api_hr("ITaskFolder::GetFolder")?;
 
     Ok((task_service, root_folder))
 }
@@ -44,10 +44,10 @@ fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     let (_, root_folder) = connect_task_service()?;
 
     match getter(|task| unsafe { root_folder.GetTask(task_path.get(), task) })
-        .map_api_hr("GetTask")
+        .map_api_hr("ITaskFolder::GetTask")
     {
         Ok(task) => Ok(Some(task)),
-        Err(Error::Api("GetTask", ErrorCode::HResult(hr)))
+        Err(Error::Api(_, ErrorCode::HResult(hr)))
             if hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) =>
         {
             Ok(None)
@@ -56,8 +56,7 @@ fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     }
 }
 
-pub fn install(task_name: &OsStr) -> Result<()>
-{
+pub fn install(task_name: &OsStr) -> Result<()> {
     let task_name = BStr::from(task_name);
     let mut image_path = [0u16; MAX_PATH + 1];
     let mut image_path_size_chars = (image_path.len() - 1) as DWORD;
@@ -85,44 +84,46 @@ pub fn install(task_name: &OsStr) -> Result<()>
                 0, // flags (reserved)
                 task_def,
             )
-        }).map_api_hr("NewTask")?;
+        }).map_api_hr("ITaskService::NewTask")?;
     }
 
     {
         let reg_info = getter(|info| unsafe { task_def.get_RegistrationInfo(info) })
-            .map_api_hr("get_RegistrationInfo")?;
+            .map_api_hr("ITaskDefinition::get_RegistrationInfo")?;
 
         check_hresult(unsafe { reg_info.put_Author(BStr::from("Mozilla").get()) })
-            .map_api_hr("put_Author")?;
+            .map_api_hr("IRegistrationInfo::put_Author")?;
     }
 
     unsafe {
         let settings = getter(|s| task_def.get_Settings(s)).map_api_hr("get_Settings")?;
-        check_hresult(settings.put_MultipleInstances(TASK_INSTANCES_IGNORE_NEW))
-            .map_api_hr("put_MultipleInstances")?;
+        check_hresult(settings.put_MultipleInstances(TASK_INSTANCES_PARALLEL))
+            .map_api_hr("ITaskSettings::put_MultipleInstances")?;
         check_hresult(settings.put_AllowDemandStart(VARIANT_TRUE))
-            .map_api_hr("put_AllowDemandStart")?;
-        check_hresult(settings.put_RunOnlyIfIdle(VARIANT_FALSE)).map_api_hr("put_RunOnlyIfIdle")?;
+            .map_api_hr("ITaskSettings::put_AllowDemandStart")?;
+        check_hresult(settings.put_RunOnlyIfIdle(VARIANT_FALSE))
+            .map_api_hr("ITaskSettings::put_RunOnlyIfIdle")?;
         check_hresult(settings.put_DisallowStartIfOnBatteries(VARIANT_FALSE))
-            .map_api_hr("put_DisallowStartIfOnBatteries")?;
+            .map_api_hr("ITaskSettings::put_DisallowStartIfOnBatteries")?;
         check_hresult(settings.put_StopIfGoingOnBatteries(VARIANT_FALSE))
-            .map_api_hr("put_StopIfGoingOnBatteries")?;
+            .map_api_hr("ITaskSettings::put_StopIfGoingOnBatteries")?;
 
-        let idle_settings =
-            getter(|s| settings.get_IdleSettings(s)).map_api_hr("get_IdleSettings")?;
+        let idle_settings = getter(|s| settings.get_IdleSettings(s))
+            .map_api_hr("ITaskSettings::get_IdleSettings")?;
         check_hresult(idle_settings.put_StopOnIdleEnd(VARIANT_FALSE))
-            .map_api_hr("put_StopOnIdleEnd")?;
+            .map_api_hr("IIdleSettings::put_StopOnIdleEnd")?;
     }
 
     unsafe {
-        let action_collection = getter(|ac| task_def.get_Actions(ac)).map_api_hr("get_Actions")?;
+        let action_collection =
+            getter(|ac| task_def.get_Actions(ac)).map_api_hr("ITaskDefinition::get_Actions")?;
         let action = getter(|a| action_collection.Create(TASK_ACTION_EXEC, a))
             .map_api_hr("IActionCollection::Create")?;
         let exec_action = cast::<_, IExecAction>(action)?;
         check_hresult(exec_action.put_Path(BStr::from(image_path).get()))
-            .map_api_hr("put_Path")?;
+            .map_api_hr("IExecAction::put_Path")?;
         check_hresult(exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get()))
-            .map_api_hr("put_Arguments")?;
+            .map_api_hr("IExecAction::put_Arguments")?;
     }
 
     let registered_task = getter(|rt| unsafe {
@@ -136,7 +137,7 @@ pub fn install(task_name: &OsStr) -> Result<()>
             Variant::<BStr>::wrap(&mut BStr::empty()).get(), // sddl
             rt,
         )
-    }).map_api_hr("RegisterTaskDefinition")?;
+    }).map_api_hr("ITaskFolder::RegisterTaskDefinition")?;
 
     // Allow read and execute access by builtin users, this is required to Get the task and
     // call Run on it
@@ -146,7 +147,7 @@ pub fn install(task_name: &OsStr) -> Result<()>
             BStr::from("D:(A;;GRGX;;;BU)").get(),
             TASK_DONT_ADD_PRINCIPAL_ACE as LONG,
         )
-    }).map_api_hr("SetSecurityDescriptor")?;
+    }).map_api_hr("IRegisteredTask::SetSecurityDescriptor")?;
 
     Ok(())
 }
@@ -155,13 +156,12 @@ pub fn uninstall(task_name: &OsStr) -> Result<()> {
     let task_name = BStr::from(task_name);
     let (_, root_folder) = connect_task_service()?;
     check_hresult(unsafe { root_folder.DeleteTask(task_name.get(), 0) })
-        .map_api_hr("DeleteTask")?;
+        .map_api_hr("ITaskFolder::DeleteTask")?;
 
     Ok(())
 }
 
-pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()>
-{
+pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()> {
     let task_name = BStr::from(task_name);
 
     let args = args
@@ -183,7 +183,8 @@ pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()>
         }
     }
 
-    getter(|rt| unsafe { maybe_task.unwrap().Run(v.get(), rt) }).map_api_hr("Run")?;
+    getter(|rt| unsafe { maybe_task.unwrap().Run(v.get(), rt) })
+        .map_api_hr("IRegisteredTask::Run")?;
 
     Ok(())
 }

@@ -10,7 +10,9 @@ use winapi::um::oaidl::SAFEARRAY;
 use winapi::um::oleauto::{SafeArrayAccessData, SafeArrayCreateVector, SafeArrayUnaccessData};
 
 use bstr::BStr;
-use error::{LabelErrorHResult, LabelErrorNone, Result, check_nonnull_no_error_code, check_hresult};
+use error::{
+    check_hresult, check_nonnull_no_error_code, LabelErrorHResult, LabelErrorNone, Result,
+};
 
 // TODO: PR for winapi-rs
 extern "system" {
@@ -65,9 +67,10 @@ pub struct SafeArrayAccess<'a, T: Copy + 'static> {
 impl<'a, T: Copy + 'static> SafeArrayAccess<'a, T> {
     unsafe fn getter(array: *mut SAFEARRAY) -> Result<*mut T> {
         let mut data = null_mut();
-        check_hresult(
-            SafeArrayAccessData(array, &mut data as *mut *mut T as *mut *mut _),
-        ).map_api_hr("SafeArrayAccessData")?;
+        check_hresult(SafeArrayAccessData(
+            array,
+            &mut data as *mut *mut T as *mut *mut _,
+        )).map_api_hr("SafeArrayAccessData")?;
         Ok(data)
     }
 

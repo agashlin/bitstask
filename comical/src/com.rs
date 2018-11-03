@@ -11,7 +11,7 @@ use winapi::um::objbase::COINIT_APARTMENTTHREADED;
 use winapi::{Class, Interface};
 use wio::com::ComPtr;
 
-use error::{LabelErrorHResult, Result, check_hresult};
+use error::{check_hresult, LabelErrorHResult, Result};
 
 pub fn getter<I, F>(closure: F) -> result::Result<ComPtr<I>, HRESULT>
 where
@@ -71,9 +71,8 @@ pub struct ComInited {
 
 impl ComInited {
     pub fn init() -> Result<Self> {
-        check_hresult(unsafe {
-            CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED)
-        }).map_api_hr("CoInitializeEx")?;
+        check_hresult(unsafe { CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED) })
+            .map_api_hr("CoInitializeEx")?;
 
         check_hresult(unsafe {
             CoInitializeSecurity(
@@ -83,9 +82,9 @@ impl ComInited {
                 null_mut(), // pReserved1
                 RPC_C_AUTHN_LEVEL_DEFAULT,
                 RPC_C_IMP_LEVEL_IMPERSONATE, //RPC_C_IMP_LEVEL_ANONYMOUS,
-                null_mut(), // pAuthList
-                0,          // dwCapabilities
-                null_mut(), // pReserved3
+                null_mut(),                  // pAuthList
+                0,                           // dwCapabilities
+                null_mut(),                  // pReserved3
             )
         }).map_api_hr("CoInitializeSecurity")?;
 

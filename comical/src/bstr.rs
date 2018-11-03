@@ -25,8 +25,7 @@ impl<'a> From<&'a str> for BStr {
         }
         let len = s16.len();
         let slice: &[u16] = &s16;
-        let bstr = unsafe {
-            SysAllocStringLen(slice as *const _ as *const OLECHAR, len as UINT) };
+        let bstr = unsafe { SysAllocStringLen(slice as *const _ as *const OLECHAR, len as UINT) };
         BStr(bstr)
     }
 }
@@ -35,8 +34,7 @@ impl<'a> From<&'a OsStr> for BStr {
     fn from(s: &'a OsStr) -> Self {
         let s16: Vec<u16> = s.encode_wide().collect();
         let len = s16.len();
-        let bstr = unsafe {
-            SysAllocStringLen(s16.as_ptr() as *const OLECHAR, len as UINT) };
+        let bstr = unsafe { SysAllocStringLen(s16.as_ptr() as *const OLECHAR, len as UINT) };
         BStr(bstr)
     }
 }
@@ -44,8 +42,7 @@ impl<'a> From<&'a OsStr> for BStr {
 impl<'a> From<&'a [u16]> for BStr {
     fn from(s: &'a [u16]) -> Self {
         let len = s.len();
-        let bstr = unsafe {
-            SysAllocStringLen(s.as_ptr() as *const OLECHAR, len as UINT) };
+        let bstr = unsafe { SysAllocStringLen(s.as_ptr() as *const OLECHAR, len as UINT) };
         BStr(bstr)
     }
 }

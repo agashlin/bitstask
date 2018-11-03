@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::mem;
 use std::ptr::null_mut;
+use std::result;
 
 use bincode::{deserialize, serialize};
 use winapi::shared::minwindef::DWORD;
@@ -10,13 +11,13 @@ use winapi::um::winbase::PIPE_READMODE_MESSAGE;
 use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE};
 use wio::wide::ToWide;
 
-use comical::error::{check_nonzero, LabelErrorDWord};
+use comical::error::{check_nonzero, Error, ErrorCode, LabelErrorDWord};
 use comical::handle::Handle;
 
-use bits::{BitsJob, create_download_job};
-use protocol::{Command, StartFailure, StartSuccess, MAX_COMMAND};
+use bits::{create_download_job, get_job, BitsJob};
+use protocol::{CancelFailure, CancelSuccess, Command, StartFailure, StartSuccess, MAX_COMMAND};
 
-pub fn run(args: &[OsString]) -> Result<(), String> {
+pub fn run(args: &[OsString]) -> result::Result<(), String> {
     if args[0] == "connect" && args.len() == 2 {
         let mut pipe_path = OsString::from("\\\\.\\pipe\\");
         pipe_path.push(&args[1]);
@@ -64,22 +65,48 @@ pub fn run(args: &[OsString]) -> Result<(), String> {
             match deserialized_command {
                 // TODO response for undeserializable command?
                 Err(_) => return Err("deserialize failed".to_string()),
-                Ok(Command::Start {
-                    url,
-                    save_path,
-                    ..
-                }) => {
+                Ok(Command::Start { url, save_path, .. }) => {
+                    // TODO: gotta capture and return errors
                     let (guid, job) = create_download_job(&OsString::from("JOBBO"))?;
                     job.add_file(&url, &save_path)?;
                     job.resume()?;
 
                     // TODO errors when serializing?
-                    let mut serialized_response =
-                        serialize::<Result<StartSuccess, StartFailure>>(&Ok(StartSuccess {
-                            guid: unsafe { mem::transmute(guid) },
-                        })).unwrap();
+                    let mut serialized_response = serialize::<
+                        result::Result<StartSuccess, StartFailure>,
+                    >(&Ok(StartSuccess { guid })).unwrap();
 
                     // TODO also need to do error handling here
+                    let mut bytes_written = 0;
+                    check_nonzero(unsafe {
+                        WriteFile(
+                            *control_pipe,
+                            serialized_response.as_mut_ptr() as *mut _,
+                            serialized_response.len() as DWORD,
+                            &mut bytes_written,
+                            null_mut(),
+                        )
+                    }).map_api_rc("WriteFile")?;
+                }
+                // TODO: should be able to make a trait (or macro) that maps to the right
+                // response pairs to clean up a lot of this.
+                // what to do about api name? expose bitsmsg error names?
+                Ok(Command::Cancel { guid }) => {
+                    let mut serialized_response = serialize::<
+                        result::Result<CancelSuccess, CancelFailure>,
+                    >(&match get_job(&guid) {
+                        Ok(job) => match job.cancel() {
+                            Ok(_) => Ok(CancelSuccess()),
+                            Err(Error::Api(_, ErrorCode::HResult(hr))) => {
+                                Err(CancelFailure::BitsFailure(hr))
+                            }
+                            Err(e) => Err(CancelFailure::GeneralFailure(e.to_string())),
+                        },
+                        Err(Error::Api(_, ErrorCode::HResult(hr))) => {
+                            Err(CancelFailure::BitsFailure(hr))
+                        }
+                        Err(e) => Err(CancelFailure::GeneralFailure(e.to_string())),
+                    }).unwrap();
                     let mut bytes_written = 0;
                     check_nonzero(unsafe {
                         WriteFile(

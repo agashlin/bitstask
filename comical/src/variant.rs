@@ -4,7 +4,7 @@ use std::slice;
 use winapi::shared::wtypes::{
     BSTR, VARENUM, VARIANT_BOOL, VARTYPE, VT_ARRAY, VT_BOOL, VT_BSTR, VT_EMPTY, VT_NULL,
 };
-use winapi::um::oaidl::{SAFEARRAY, VARIANT_n3, __tagVARIANT, VARIANT};
+use winapi::um::oaidl::{VARIANT_n3, __tagVARIANT, SAFEARRAY, VARIANT};
 
 use bstr::BStr;
 use safearray::{SafeArray, SafeArrayAccess};
@@ -100,8 +100,9 @@ impl<'a, T> Variant<'a, T> {
     pub fn value(&self) -> VariantValue {
         match self.vartype() {
             VT::String => VV::String(unsafe { Self::build_string(self.n3().bstrVal()) }),
-            VT::StringVector =>
-                VV::StringVector(unsafe { Self::build_string_vector(self.n3().parray()) }),
+            VT::StringVector => {
+                VV::StringVector(unsafe { Self::build_string_vector(self.n3().parray()) })
+            }
             VT::Bool => VV::Bool(unsafe { *self.n3().boolVal() } != VARIANT_FALSE),
             VT::Empty => VV::Empty(),
             VT::Null => VV::Null(),

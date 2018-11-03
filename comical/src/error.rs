@@ -27,11 +27,11 @@ impl fmt::Display for Error {
             Error::Api(api, ec) => {
                 write!(f, "{} failed.", api);
                 match ec {
-                    ErrorCode::None => {},
+                    ErrorCode::None => {}
                     ErrorCode::DWord(rc) => write!(f, " rc = {:#010x}", rc)?,
                     ErrorCode::HResult(hr) => write!(f, " hr = {:#010x}", hr)?,
                 }
-            },
+            }
             Error::Message(ref msg) => f.write_str(msg)?,
         }
 

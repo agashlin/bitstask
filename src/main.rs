@@ -9,16 +9,18 @@ extern crate wio;
 mod bits;
 mod client;
 mod protocol;
-mod task_service;
 mod server;
+mod task_service;
 
 use std::env;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::Write;
 use std::process;
+use std::str::FromStr;
 
 use comical::com::ComInited;
+use comical::guid::Guid;
 
 fn main() {
     if let Err(err) = entry() {
@@ -43,24 +45,35 @@ fn entry() -> Result<(), String> {
 
     let cmd_args = &args[2..];
 
+    let task_name = OsString::from(TASK_NAME);
+
     Ok(match &*args[1].to_string_lossy() {
         "install" => if cmd_args.is_empty() {
-            task_service::install(&OsString::from(TASK_NAME))?;
+            task_service::install(&task_name)?;
         } else {
             return Err("install takes no argments".to_string());
         },
         "uninstall" => if cmd_args.is_empty() {
-            task_service::uninstall(&OsString::from(TASK_NAME))?;
+            task_service::uninstall(&task_name)?;
         } else {
             return Err("uninstall takes no arguments".to_string());
         },
         "bits-start" => if cmd_args.is_empty() {
-            let guid = client::bits_start(&OsString::from(TASK_NAME))?;
+            let guid = client::bits_start(&task_name)?;
 
-            println!("success, guid = {:?}", guid);
+            println!("success, guid = {}", guid);
         } else {
             return Err("start takes no arguments".to_string());
         },
+        "bits-cancel" => {
+            // TODO do all these over one connection
+            for guid in cmd_args
+                .iter()
+                .map(|arg| Guid::from_str(&arg.to_string_lossy()))
+            {
+                client::bits_cancel(&task_name, guid?)?;
+            }
+        }
         "task" => if let Err(s) = server::run(cmd_args) {
             // debug log
             File::create("C:\\ProgramData\\fail.log")
