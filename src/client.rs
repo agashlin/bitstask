@@ -18,9 +18,10 @@ use winapi::um::winbase::{
 };
 use wio::wide::ToWide;
 
-use comical::error::{check_nonzero, Error, LabelErrorDWord, Result};
+use comical::error::{Error, ErrorCode, Result};
 use comical::guid::Guid;
 use comical::handle::Handle;
+use comical::{check_api_handle, check_api_nonzero};
 
 use protocol::{
     CancelFailure, CancelSuccess, Command, StartFailure, StartSuccess, MAX_COMMAND, MAX_RESPONSE,
@@ -37,10 +38,12 @@ impl<'a> NamedPipeConnection<'a> {
     // TODO: I could use GetNamedPipeHandleState to verify PIPE_NOWAIT is not set to be safe?
     // TODO: practically we will want to do this async anyway
     pub fn connect_sync(pipe: &'a Handle) -> Result<Self> {
-        match check_nonzero(unsafe { ConnectNamedPipe(**pipe, null_mut()) }) {
-            Ok(_) | Err(ERROR_PIPE_CONNECTED) => Ok(NamedPipeConnection { pipe }),
+        match unsafe { check_api_nonzero!(ConnectNamedPipe(**pipe, null_mut())) } {
+            Ok(_) | Err(Error::Api(_, ErrorCode::DWord(ERROR_PIPE_CONNECTED), _)) => {
+                Ok(NamedPipeConnection { pipe })
+            }
             Err(rc) => Err(rc),
-        }.map_api_rc("ConnectNamedPipe")
+        }
     }
 }
 
@@ -56,14 +59,14 @@ impl<'a> Drop for NamedPipeConnection<'a> {
 fn create_pipe(name: &str, bufsize: usize) -> Result<Handle> {
     let pipe_path = OsString::from(format!("\\\\.\\pipe\\{}", name)).to_wide_null();
     let mut psd = null_mut(); // TODO: leaked
-    check_nonzero(unsafe {
-        ConvertStringSecurityDescriptorToSecurityDescriptorA(
+    unsafe {
+        check_api_nonzero!(ConvertStringSecurityDescriptorToSecurityDescriptorA(
             b"D:(A;;GRGW;;;LS)\0".as_ptr() as *const _,
             SDDL_REVISION_1 as DWORD,
             &mut psd,
             null_mut(),
-        )
-    }).map_api_rc("ConvertStringSecurityDescriptorToSecurityDescriptorA")?;
+        ))
+    }?;
 
     let mut sa = SECURITY_ATTRIBUTES {
         nLength: size_of::<SECURITY_ATTRIBUTES>() as DWORD,
@@ -72,7 +75,7 @@ fn create_pipe(name: &str, bufsize: usize) -> Result<Handle> {
     };
 
     unsafe {
-        Handle::wrap_handle(CreateNamedPipeW(
+        check_api_handle!(CreateNamedPipeW(
             pipe_path.as_ptr(),
             PIPE_ACCESS_DUPLEX | FILE_FLAG_FIRST_PIPE_INSTANCE,
             PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_REJECT_REMOTE_CLIENTS,
@@ -82,7 +85,7 @@ fn create_pipe(name: &str, bufsize: usize) -> Result<Handle> {
             0,                // nDefaultTimeOut (50ms default)
             &mut sa,
         ))
-    }.map_api_rc("CreateNamedPipeW")
+    }
 }
 
 fn run_command<'a, T, E>(
@@ -114,8 +117,8 @@ where
     // TODO: failure conditions?
     let mut in_buf = serialize(&cmd).unwrap();
     let mut bytes_read = 0;
-    check_nonzero(unsafe {
-        TransactNamedPipe(
+    unsafe {
+        check_api_nonzero!(TransactNamedPipe(
             *control_pipe,
             in_buf.as_mut_ptr() as *mut _,
             in_buf.len() as DWORD,
@@ -123,8 +126,8 @@ where
             out_buf.len() as DWORD,
             &mut bytes_read,
             null_mut(),
-        )
-    }).map_api_rc("TransactNamedPipe")?;
+        ))
+    }?;
     println!("transacted");
 
     println!("{:?}", &out_buf[..bytes_read as usize]);

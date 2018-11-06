@@ -11,8 +11,8 @@ use winapi::um::winbase::PIPE_READMODE_MESSAGE;
 use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE};
 use wio::wide::ToWide;
 
-use comical::error::{check_nonzero, Error, ErrorCode, LabelErrorDWord};
-use comical::handle::Handle;
+use comical::error::{Error, ErrorCode};
+use comical::{check_api_handle, check_api_nonzero};
 
 use bits::{create_download_job, get_job, BitsJob};
 use protocol::{CancelFailure, CancelSuccess, Command, StartFailure, StartSuccess, MAX_COMMAND};
@@ -24,7 +24,7 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
         let pipe_path = pipe_path.to_wide_null();
 
         let control_pipe = unsafe {
-            Handle::wrap_handle(CreateFileW(
+            check_api_handle!(CreateFileW(
                 pipe_path.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE,
                 0,          // dwShareMode
@@ -33,32 +33,32 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
                 0, // dwFlagsAndAttributes
                 null_mut(),
             ))
-        }.map_api_rc("CreateFileW")?;
+        }?;
 
         let mut mode = PIPE_READMODE_MESSAGE;
-        check_nonzero(unsafe {
-            SetNamedPipeHandleState(
+        unsafe {
+            check_api_nonzero!(SetNamedPipeHandleState(
                 *control_pipe,
                 &mut mode,
                 null_mut(), // lpMaxCollectionCount
                 null_mut(), // lpCollectDataTimeout
-            )
-        }).map_api_rc("SetNamedPipeHandleState")?;
+            ))
+        }?;
 
         loop {
             let mut buf: [u8; MAX_COMMAND] = unsafe { mem::uninitialized() };
             let mut bytes_read = 0;
             // TODO better handling of errors, not really a disaster if the pipe closes, and
             // we may want to do something with ERROR_MORE_DATA
-            check_nonzero(unsafe {
-                ReadFile(
+            unsafe {
+                check_api_nonzero!(ReadFile(
                     *control_pipe,
                     buf.as_mut_ptr() as *mut _,
                     buf.len() as DWORD,
                     &mut bytes_read,
                     null_mut(),
-                )
-            }).map_api_rc("ReadFile")?;
+                ))
+            }?;
 
             // TODO setup logging
             let deserialized_command = deserialize(&buf[..bytes_read as usize]);
@@ -78,15 +78,15 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
 
                     // TODO also need to do error handling here
                     let mut bytes_written = 0;
-                    check_nonzero(unsafe {
-                        WriteFile(
+                    unsafe {
+                        check_api_nonzero!(WriteFile(
                             *control_pipe,
                             serialized_response.as_mut_ptr() as *mut _,
                             serialized_response.len() as DWORD,
                             &mut bytes_written,
                             null_mut(),
-                        )
-                    }).map_api_rc("WriteFile")?;
+                        ))
+                    }?;
                 }
                 // TODO: should be able to make a trait (or macro) that maps to the right
                 // response pairs to clean up a lot of this.
@@ -97,26 +97,26 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
                     >(&match get_job(&guid) {
                         Ok(job) => match job.cancel() {
                             Ok(_) => Ok(CancelSuccess()),
-                            Err(Error::Api(_, ErrorCode::HResult(hr))) => {
+                            Err(Error::Api(_, ErrorCode::HResult(hr), _)) => {
                                 Err(CancelFailure::BitsFailure(hr))
                             }
                             Err(e) => Err(CancelFailure::GeneralFailure(e.to_string())),
                         },
-                        Err(Error::Api(_, ErrorCode::HResult(hr))) => {
+                        Err(Error::Api(_, ErrorCode::HResult(hr), _)) => {
                             Err(CancelFailure::BitsFailure(hr))
                         }
                         Err(e) => Err(CancelFailure::GeneralFailure(e.to_string())),
                     }).unwrap();
                     let mut bytes_written = 0;
-                    check_nonzero(unsafe {
-                        WriteFile(
+                    unsafe {
+                        check_api_nonzero!(WriteFile(
                             *control_pipe,
                             serialized_response.as_mut_ptr() as *mut _,
                             serialized_response.len() as DWORD,
                             &mut bytes_written,
                             null_mut(),
-                        )
-                    }).map_api_rc("WriteFile")?;
+                        ))
+                    }?;
                 }
                 Ok(_) => {
                     unimplemented!();

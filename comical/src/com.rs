@@ -31,7 +31,7 @@ where
     i1.cast().map_api_hr("QueryInterface")
 }
 
-pub fn create_instance<C, I>(ctx: CLSCTX) -> result::Result<ComPtr<I>, HRESULT>
+pub fn create_instance<C, I>(ctx: CLSCTX) -> Result<ComPtr<I>>
 where
     C: Class,
     I: Interface,
@@ -44,22 +44,53 @@ where
             &I::uuidof(),
             interface as *mut *mut _,
         )
-    })
+    }).map_api_hr("CoCreateInstance")
 }
 
-pub fn create_instance_local_server<C, I>() -> result::Result<ComPtr<I>, HRESULT>
+pub fn create_instance_local_server<C, I>() -> Result<ComPtr<I>>
 where
     C: Class,
     I: Interface,
 {
     create_instance::<C, I>(CLSCTX_LOCAL_SERVER)
 }
-pub fn create_instance_inproc_server<C, I>() -> result::Result<ComPtr<I>, HRESULT>
+pub fn create_instance_inproc_server<C, I>() -> Result<ComPtr<I>>
 where
     C: Class,
     I: Interface,
 {
     create_instance::<C, I>(CLSCTX_INPROC_SERVER)
+}
+
+#[macro_export]
+macro_rules! call {
+    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {
+        check_hresult({
+            let obj: &$interface = &*$obj;
+            obj.$method($($arg),*)
+        }).map_api_hr_file_line(
+            concat!(stringify!($interface), "::", stringify!($method)), file!(), line!())
+    };
+    // support for trailing comma in argument list
+    ($obj:expr, $interface:ident :: $method:ident ( $($arg:expr),+ , )) => {
+        call!($obj, $interface::$method($($arg),+))
+    };
+}
+
+/// Call a method, getting an interface to a newly created object.
+#[macro_export]
+macro_rules! get {
+    (| $outparam:ident | $obj:expr, $interface:ident :: $method:ident ( $($arg:expr),* )) => {{
+        let obj: &$interface = &*$obj;
+        getter(|$outparam| {
+            obj.$method($($arg),*)
+        }).map_api_hr_file_line(
+            concat!(stringify!($interface), "::", stringify!($method)), file!(), line!())
+    }};
+    // support for trailing comma in argument list
+    (| $outparam:ident | $obj:expr, $interface:ident :: $method:ident ( $($arg:expr),+ , )) => {
+        get!(|$outparam| $obj, $interface::$method($($arg),+))
+    };
 }
 
 /// uninitialize COM when this drops

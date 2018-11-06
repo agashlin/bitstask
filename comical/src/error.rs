@@ -16,21 +16,28 @@ pub enum ErrorCode {
 }
 
 #[derive(Debug)]
+pub struct FileLine(&'static str, u32);
+
+#[derive(Debug)]
 pub enum Error {
-    Api(&'static str, ErrorCode),
+    Api(&'static str, ErrorCode, Option<FileLine>),
     Message(String),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> result::Result<(), fmt::Error> {
         match self {
-            Error::Api(api, ec) => {
+            Error::Api(api, ec, file_line) => {
+                match file_line {
+                    None => {}
+                    Some(FileLine(file, line)) => write!(f, "{}:{} ", file, line)?,
+                };
                 write!(f, "{} failed.", api);
                 match ec {
                     ErrorCode::None => {}
                     ErrorCode::DWord(rc) => write!(f, " rc = {:#010x}", rc)?,
                     ErrorCode::HResult(hr) => write!(f, " hr = {:#010x}", hr)?,
-                }
+                };
             }
             Error::Message(ref msg) => f.write_str(msg)?,
         }
@@ -88,30 +95,74 @@ impl<T, E> LabelErrorMessage<T> for result::Result<T, E> {
 
 pub trait LabelErrorNone<T> {
     fn map_api(self, api: &'static str) -> Result<T>;
+    fn map_api_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T>;
 }
 
 impl<T> LabelErrorNone<T> for result::Result<T, ()> {
     fn map_api(self, api: &'static str) -> Result<T> {
-        self.map_err(|_| Error::Api(api, ErrorCode::None))
+        self.map_err(|_| Error::Api(api, ErrorCode::None, None))
+    }
+
+    fn map_api_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T> {
+        self.map_err(|_| Error::Api(api, ErrorCode::None, Some(FileLine(file, line))))
     }
 }
 
 pub trait LabelErrorDWord<T> {
     fn map_api_rc(self, api: &'static str) -> Result<T>;
+    fn map_api_rc_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T>;
 }
 
 impl<T> LabelErrorDWord<T> for result::Result<T, DWORD> {
     fn map_api_rc(self, api: &'static str) -> Result<T> {
-        self.map_err(|rc| Error::Api(api, ErrorCode::DWord(rc)))
+        self.map_err(|rc| Error::Api(api, ErrorCode::DWord(rc), None))
     }
+
+    fn map_api_rc_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T> {
+        self.map_err(|rc| Error::Api(api, ErrorCode::DWord(rc), Some(FileLine(file, line))))
+    }
+}
+
+#[macro_export]
+macro_rules! check_api_nonzero {
+    ($f:ident ( $($arg:expr),* )) => {
+        {
+            use $crate::error::LabelErrorDWord;
+            $crate::error::check_nonzero($f($($arg),*))
+                .map_api_rc_file_line(stringify!($f), file!(), line!())
+        }
+    };
+    // handle comma
+    ($f:ident ( $($arg:expr),+ , )) => {
+        check_api_nonzero!($f($($arg),+))
+    };
 }
 
 pub trait LabelErrorHResult<T> {
     fn map_api_hr(self, api: &'static str) -> Result<T>;
+    fn map_api_hr_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T>;
 }
 
 impl<T> LabelErrorHResult<T> for result::Result<T, HRESULT> {
     fn map_api_hr(self, api: &'static str) -> Result<T> {
-        self.map_err(|hr| Error::Api(api, ErrorCode::HResult(hr)))
+        self.map_err(|hr| Error::Api(api, ErrorCode::HResult(hr), None))
     }
+
+    fn map_api_hr_file_line(self, api: &'static str, file: &'static str, line: u32) -> Result<T> {
+        self.map_err(|hr| Error::Api(api, ErrorCode::HResult(hr), Some(FileLine(file, line))))
+    }
+}
+
+#[macro_export]
+macro_rules! check_api_hr {
+    ($f:ident ( $($arg:expr),* )) => {
+        {
+            use $crate::error::LabelErrorHResult;
+            $crate::error::check_hr($f($($arg),*))
+                .map_api_hr_file_line(stringify!($f), file!(), line!())
+        }
+    };
+    ($f:ident ( $($arg:expr),+ , )) => {
+        check_api_hr!($f($($arg),+))
+    };
 }

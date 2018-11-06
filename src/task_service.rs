@@ -7,13 +7,15 @@ use comical::error::{
 };
 use comical::safearray::SafeArray;
 use comical::variant::{Variant, VariantValue, VARIANT_FALSE, VARIANT_TRUE};
+use comical::{call, get};
 
 use winapi::shared::minwindef::{DWORD, MAX_PATH};
 use winapi::shared::ntdef::LONG;
 use winapi::shared::winerror::{ERROR_FILE_NOT_FOUND, HRESULT_FROM_WIN32};
 use winapi::um::processthreadsapi::GetCurrentProcess;
 use winapi::um::taskschd::{
-    IExecAction, IRegisteredTask, ITaskFolder, ITaskService, TaskScheduler, TASK_ACTION_EXEC,
+    IActionCollection, IExecAction, IIdleSettings, IRegisteredTask, IRegistrationInfo,
+    ITaskDefinition, ITaskFolder, ITaskService, ITaskSettings, TaskScheduler, TASK_ACTION_EXEC,
     TASK_CREATE_OR_UPDATE, TASK_DONT_ADD_PRINCIPAL_ACE, TASK_INSTANCES_PARALLEL,
     TASK_LOGON_SERVICE_ACCOUNT,
 };
@@ -21,21 +23,20 @@ use winapi::um::winbase::QueryFullProcessImageNameW;
 use wio::com::ComPtr;
 
 fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)> {
-    let task_service = create_instance_inproc_server::<TaskScheduler, ITaskService>()
-        .map_api_hr("CoCreateInstance")?;
+    let task_service = create_instance_inproc_server::<TaskScheduler, ITaskService>()?;
 
-    check_hresult(unsafe {
+    // Connect to local service with no credentials.
+    unsafe {
         let null = Variant::null().get();
-        task_service.Connect(
-            null, // serverName
-            null, // user
-            null, // domain
-            null, // password
+        call!(task_service, ITaskService::Connect(null, null, null, null))?;
+    }
+
+    let root_folder = unsafe {
+        get!(
+            |folder| task_service,
+            ITaskService::GetFolder(BStr::from("\\").get(), folder)
         )
-    }).map_api_hr("ITaskService::Connect")?;
-    let root_folder = getter(|root_folder| unsafe {
-        task_service.GetFolder(BStr::from("\\").get(), root_folder)
-    }).map_api_hr("ITaskFolder::GetFolder")?;
+    }?;
 
     Ok((task_service, root_folder))
 }
@@ -43,11 +44,15 @@ fn connect_task_service() -> Result<(ComPtr<ITaskService>, ComPtr<ITaskFolder>)>
 fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     let (_, root_folder) = connect_task_service()?;
 
-    match getter(|task| unsafe { root_folder.GetTask(task_path.get(), task) })
-        .map_api_hr("ITaskFolder::GetTask")
-    {
+    let task = unsafe {
+        get!(
+            |task| root_folder,
+            ITaskFolder::GetTask(task_path.get(), task)
+        )
+    };
+    match task {
         Ok(task) => Ok(Some(task)),
-        Err(Error::Api(_, ErrorCode::HResult(hr)))
+        Err(Error::Api(_, ErrorCode::HResult(hr), _))
             if hr == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND) =>
         {
             Ok(None)
@@ -87,67 +92,82 @@ pub fn install(task_name: &OsStr) -> Result<()> {
         }).map_api_hr("ITaskService::NewTask")?;
     }
 
-    {
-        let reg_info = getter(|info| unsafe { task_def.get_RegistrationInfo(info) })
-            .map_api_hr("ITaskDefinition::get_RegistrationInfo")?;
-
-        check_hresult(unsafe { reg_info.put_Author(BStr::from("Mozilla").get()) })
-            .map_api_hr("IRegistrationInfo::put_Author")?;
+    unsafe {
+        let reg_info = get!(|info| task_def, ITaskDefinition::get_RegistrationInfo(info))?;
+        call!(
+            reg_info,
+            IRegistrationInfo::put_Author(BStr::from("Mozilla").get())
+        )?;
     }
 
     unsafe {
-        let settings = getter(|s| task_def.get_Settings(s)).map_api_hr("get_Settings")?;
-        check_hresult(settings.put_MultipleInstances(TASK_INSTANCES_PARALLEL))
-            .map_api_hr("ITaskSettings::put_MultipleInstances")?;
-        check_hresult(settings.put_AllowDemandStart(VARIANT_TRUE))
-            .map_api_hr("ITaskSettings::put_AllowDemandStart")?;
-        check_hresult(settings.put_RunOnlyIfIdle(VARIANT_FALSE))
-            .map_api_hr("ITaskSettings::put_RunOnlyIfIdle")?;
-        check_hresult(settings.put_DisallowStartIfOnBatteries(VARIANT_FALSE))
-            .map_api_hr("ITaskSettings::put_DisallowStartIfOnBatteries")?;
-        check_hresult(settings.put_StopIfGoingOnBatteries(VARIANT_FALSE))
-            .map_api_hr("ITaskSettings::put_StopIfGoingOnBatteries")?;
+        let settings = get!(|s| task_def, ITaskDefinition::get_Settings(s))?;
+        comical::call!(
+            settings,
+            ITaskSettings::put_MultipleInstances(TASK_INSTANCES_PARALLEL)
+        )?;
+        call!(settings, ITaskSettings::put_AllowDemandStart(VARIANT_TRUE))?;
+        call!(settings, ITaskSettings::put_RunOnlyIfIdle(VARIANT_FALSE))?;
+        call!(
+            settings,
+            ITaskSettings::put_DisallowStartIfOnBatteries(VARIANT_FALSE)
+        )?;
+        call!(
+            settings,
+            ITaskSettings::put_StopIfGoingOnBatteries(VARIANT_FALSE)
+        )?;
 
-        let idle_settings = getter(|s| settings.get_IdleSettings(s))
-            .map_api_hr("ITaskSettings::get_IdleSettings")?;
-        check_hresult(idle_settings.put_StopOnIdleEnd(VARIANT_FALSE))
-            .map_api_hr("IIdleSettings::put_StopOnIdleEnd")?;
+        let idle_settings = get!(|is| settings, ITaskSettings::get_IdleSettings(is))?;
+        call!(
+            idle_settings,
+            IIdleSettings::put_StopOnIdleEnd(VARIANT_FALSE)
+        )?;
     }
 
     unsafe {
-        let action_collection =
-            getter(|ac| task_def.get_Actions(ac)).map_api_hr("ITaskDefinition::get_Actions")?;
-        let action = getter(|a| action_collection.Create(TASK_ACTION_EXEC, a))
-            .map_api_hr("IActionCollection::Create")?;
-        let exec_action = cast::<_, IExecAction>(action)?;
-        check_hresult(exec_action.put_Path(BStr::from(image_path).get()))
-            .map_api_hr("IExecAction::put_Path")?;
-        check_hresult(exec_action.put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get()))
-            .map_api_hr("IExecAction::put_Arguments")?;
+        let action_collection = get!(|ac| task_def, ITaskDefinition::get_Actions(ac))?;
+        let exec_action = cast(get!(
+            |a| action_collection,
+            IActionCollection::Create(TASK_ACTION_EXEC, a)
+        )?)?;
+        call!(
+            exec_action,
+            IExecAction::put_Path(BStr::from(image_path).get())
+        )?;
+        call!(
+            exec_action,
+            IExecAction::put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get())
+        )?;
     }
 
-    let registered_task = getter(|rt| unsafe {
-        root_folder.RegisterTaskDefinition(
-            task_name.get(),
-            task_def.as_raw(),
-            TASK_CREATE_OR_UPDATE as LONG,
-            Variant::<BStr>::wrap(&mut BStr::from("NT AUTHORITY\\LocalService")).get(),
-            Variant::null().get(), // password
-            TASK_LOGON_SERVICE_ACCOUNT,
-            Variant::<BStr>::wrap(&mut BStr::empty()).get(), // sddl
-            rt,
+    let registered_task = unsafe {
+        get!(
+            |rt| root_folder,
+            ITaskFolder::RegisterTaskDefinition(
+                task_name.get(),
+                task_def.as_raw(),
+                TASK_CREATE_OR_UPDATE as LONG,
+                Variant::<BStr>::wrap(&mut BStr::from("NT AUTHORITY\\LocalService")).get(),
+                Variant::null().get(), // password
+                TASK_LOGON_SERVICE_ACCOUNT,
+                Variant::<BStr>::wrap(&mut BStr::empty()).get(), // sddl
+                rt,
+            )
         )
-    }).map_api_hr("ITaskFolder::RegisterTaskDefinition")?;
+    }?;
 
     // Allow read and execute access by builtin users, this is required to Get the task and
     // call Run on it
     // TODO: should this just be in sddl above? I think that ends up adding BU as principal?
-    check_hresult(unsafe {
-        registered_task.SetSecurityDescriptor(
-            BStr::from("D:(A;;GRGX;;;BU)").get(),
-            TASK_DONT_ADD_PRINCIPAL_ACE as LONG,
+    unsafe {
+        call!(
+            registered_task,
+            IRegisteredTask::SetSecurityDescriptor(
+                BStr::from("D:(A;;GRGX;;;BU)").get(),
+                TASK_DONT_ADD_PRINCIPAL_ACE as LONG,
+            )
         )
-    }).map_api_hr("IRegisteredTask::SetSecurityDescriptor")?;
+    }?;
 
     Ok(())
 }
@@ -155,8 +175,12 @@ pub fn install(task_name: &OsStr) -> Result<()> {
 pub fn uninstall(task_name: &OsStr) -> Result<()> {
     let task_name = BStr::from(task_name);
     let (_, root_folder) = connect_task_service()?;
-    check_hresult(unsafe { root_folder.DeleteTask(task_name.get(), 0) })
-        .map_api_hr("ITaskFolder::DeleteTask")?;
+    unsafe {
+        call!(
+            root_folder,
+            ITaskFolder::DeleteTask(BStr::from(task_name).get(), 0)
+        )?
+    };
 
     Ok(())
 }
@@ -173,6 +197,7 @@ pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()> {
     if maybe_task.is_none() {
         return Err(Error::Message("No such task".to_string()));
     }
+    let task = maybe_task.unwrap();
 
     // DEBUG
     let mut sa = SafeArray::try_from(args)?;
@@ -183,8 +208,7 @@ pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()> {
         }
     }
 
-    getter(|rt| unsafe { maybe_task.unwrap().Run(v.get(), rt) })
-        .map_api_hr("IRegisteredTask::Run")?;
+    unsafe { get!(|rt| task, IRegisteredTask::Run(v.get(), rt))? };
 
     Ok(())
 }

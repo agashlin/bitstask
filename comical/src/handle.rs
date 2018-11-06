@@ -39,3 +39,17 @@ impl Drop for Handle {
         }
     }
 }
+
+#[macro_export]
+macro_rules! check_api_handle {
+    ($f:ident ( $($arg:expr),* )) => {
+        {
+            use $crate::error::LabelErrorDWord;
+            $crate::handle::Handle::wrap_handle($f($($arg),*))
+                .map_api_rc_file_line(stringify!($f), file!(), line!())
+        }
+    };
+    ($f:ident ( $($arg:expr),+ , )) => {
+        check_api_handle!($f($($arg),*))
+    };
+}
