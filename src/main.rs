@@ -8,6 +8,7 @@ extern crate wio;
 
 mod bits;
 mod client;
+mod pipe;
 mod protocol;
 mod server;
 mod task_service;
@@ -17,10 +18,14 @@ use std::ffi::OsString;
 use std::fs::File;
 use std::io::Write;
 use std::process;
+use std::ptr::null_mut;
 use std::str::FromStr;
 
+use comical::check_api_hr;
 use comical::com::ComInited;
 use comical::guid::Guid;
+use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE};
+use winapi::um::combaseapi::CoInitializeSecurity;
 
 fn main() {
     if let Err(err) = entry() {
@@ -41,7 +46,22 @@ fn entry() -> Result<(), String> {
         return Err(format!("Usage: {} <command>", EXE_NAME));
     }
 
-    let _ci = ComInited::init()?;
+    let _ci = ComInited::init_sta()?;
+
+    // TODO: there should probably be a comical helper for this
+    unsafe {
+        check_api_hr!(CoInitializeSecurity(
+            null_mut(), // pSecDesc
+            -1,         // cAuthSvc
+            null_mut(), // asAuthSvc
+            null_mut(), // pReserved1
+            RPC_C_AUTHN_LEVEL_DEFAULT,
+            RPC_C_IMP_LEVEL_IMPERSONATE,
+            null_mut(), // pAuthList
+            0,          // dwCapabilities
+            null_mut(), // pReserved3
+        ))
+    }?;
 
     let cmd_args = &args[2..];
 

@@ -12,7 +12,7 @@ use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE};
 use wio::wide::ToWide;
 
 use comical::error::{Error, ErrorCode};
-use comical::{check_api_handle, check_api_nonzero};
+use comical::{check_api_nonzero, wrap_api_handle};
 
 use bits::{create_download_job, get_job, BitsJob};
 use protocol::{CancelFailure, CancelSuccess, Command, StartFailure, StartSuccess, MAX_COMMAND};
@@ -24,7 +24,7 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
         let pipe_path = pipe_path.to_wide_null();
 
         let control_pipe = unsafe {
-            check_api_handle!(CreateFileW(
+            wrap_api_handle!(CreateFileW(
                 pipe_path.as_ptr(),
                 GENERIC_READ | GENERIC_WRITE,
                 0,          // dwShareMode

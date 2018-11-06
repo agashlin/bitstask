@@ -158,7 +158,7 @@ macro_rules! check_api_hr {
     ($f:ident ( $($arg:expr),* )) => {
         {
             use $crate::error::LabelErrorHResult;
-            $crate::error::check_hr($f($($arg),*))
+            $crate::error::check_hresult($f($($arg),*))
                 .map_api_hr_file_line(stringify!($f), file!(), line!())
         }
     };

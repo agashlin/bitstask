@@ -15,7 +15,9 @@ use error::{check_hresult, LabelErrorHResult};
 const GUID_STRING_CHARACTERS: usize = 38;
 
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct Guid(pub GUID);
+
 pub type GuidBuf = [u8; size_of::<GUID>()];
 
 impl Debug for Guid {

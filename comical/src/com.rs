@@ -1,16 +1,14 @@
 use std::ptr::null_mut;
 use std::result;
 
-use winapi::shared::rpcdce::{RPC_C_AUTHN_LEVEL_DEFAULT, RPC_C_IMP_LEVEL_IMPERSONATE};
 use winapi::shared::winerror::HRESULT;
 use winapi::shared::wtypesbase::{CLSCTX, CLSCTX_INPROC_SERVER, CLSCTX_LOCAL_SERVER};
-use winapi::um::combaseapi::{
-    CoCreateInstance, CoInitializeEx, CoInitializeSecurity, CoUninitialize,
-};
-use winapi::um::objbase::COINIT_APARTMENTTHREADED;
+use winapi::um::combaseapi::{CoCreateInstance, CoInitializeEx, CoUninitialize};
+use winapi::um::objbase::{COINIT_APARTMENTTHREADED, COINIT_MULTITHREADED};
 use winapi::{Class, Interface};
 use wio::com::ComPtr;
 
+use check_api_hr;
 use error::{check_hresult, LabelErrorHResult, Result};
 
 pub fn getter<I, F>(closure: F) -> result::Result<ComPtr<I>, HRESULT>
@@ -94,30 +92,21 @@ macro_rules! get {
 }
 
 /// uninitialize COM when this drops
-// TODO: I had the idea to require passing a ref to this into any other COM stuff, but it seems
-// really cumbersome.
 pub struct ComInited {
     _init_only: (),
 }
 
 impl ComInited {
-    pub fn init() -> Result<Self> {
-        check_hresult(unsafe { CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED) })
-            .map_api_hr("CoInitializeEx")?;
+    /// This thread should be the sole occupant of a single thread apartment
+    pub fn init_sta() -> Result<Self> {
+        unsafe { check_api_hr!(CoInitializeEx(null_mut(), COINIT_APARTMENTTHREADED)) }?;
 
-        check_hresult(unsafe {
-            CoInitializeSecurity(
-                null_mut(), // pSecDesc
-                -1,         // cAuthSvc
-                null_mut(), // asAuthSvc
-                null_mut(), // pReserved1
-                RPC_C_AUTHN_LEVEL_DEFAULT,
-                RPC_C_IMP_LEVEL_IMPERSONATE, //RPC_C_IMP_LEVEL_ANONYMOUS,
-                null_mut(),                  // pAuthList
-                0,                           // dwCapabilities
-                null_mut(),                  // pReserved3
-            )
-        }).map_api_hr("CoInitializeSecurity")?;
+        Ok(ComInited { _init_only: () })
+    }
+
+    /// This thread should jon the process's multi thread apartment
+    pub fn init_mta() -> Result<Self> {
+        unsafe { check_api_hr!(CoInitializeEx(null_mut(), COINIT_MULTITHREADED)) }?;
 
         Ok(ComInited { _init_only: () })
     }
@@ -130,3 +119,5 @@ impl Drop for ComInited {
         }
     }
 }
+
+// TODO: decide what to do about CoInitializeSecurity

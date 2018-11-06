@@ -24,6 +24,7 @@ struct GUIDSerde {
 
 #[derive(Serialize, Deserialize)]
 #[serde(remote = "Guid")]
+#[repr(transparent)]
 struct GuidSerde(#[serde(with = "GUIDSerde")] pub GUID);
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
