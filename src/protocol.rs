@@ -1,15 +1,15 @@
 use std::ffi::OsString;
 
 use comical::guid::Guid;
+use serde::{Deserialize, Serialize};
 use serde_derive::{Deserialize, Serialize};
 use winapi::ctypes::{c_uchar, c_ulong, c_ushort};
 use winapi::shared::guiddef::GUID;
-use winapi::shared::winerror::HRESULT;
 
 pub const MAX_COMMAND: usize = 2048;
 pub const MAX_RESPONSE: usize = 128;
-
 // TODO: version
+//pub const PROTOCOL_VERSION: u8 = 1;
 
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize)]
@@ -27,97 +27,69 @@ struct GUIDSerde {
 #[repr(transparent)]
 struct GuidSerde(#[serde(with = "GUIDSerde")] pub GUID);
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+// Any command
+#[derive(Debug, Deserialize, Serialize)]
 pub enum Command {
-    Start {
-        url: OsString,
-        save_path: OsString,
-        update_interval_ms: Option<u32>,
-        log_directory_path: OsString,
-    },
-    Monitor {
-        #[serde(with = "GuidSerde")]
-        guid: Guid,
-        update_interval_ms: Option<u32>,
-        log_directory_path: OsString,
-    },
-    Cancel {
-        #[serde(with = "GuidSerde")]
-        guid: Guid,
-    },
+    StartJob(StartJobCommand),
+    MonitorJob(MonitorJobCommand),
+    CancelJob(CancelJobCommand),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct StartSuccess {
+pub trait CommandType<'a, 'b, 'c>: Deserialize<'a> + Serialize {
+    type Success: Deserialize<'b> + Serialize;
+    type Failure: Deserialize<'c> + Serialize;
+}
+
+// Start
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StartJobCommand {
+    pub url: OsString,
+    pub save_path: OsString,
+    pub update_interval_ms: Option<u32>,
+    pub log_directory_path: OsString,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StartJobSuccess {
     #[serde(with = "GuidSerde")]
     pub guid: Guid,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum StartFailure {
-    BitsFailure(HRESULT),
-    GeneralFailure(String),
+impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for StartJobCommand {
+    type Success = StartJobSuccess;
+    // TODO FIXME temporary hack
+    type Failure = String;
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct MonitorSuccess();
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum MonitorFailure {
-    BitsFailure(HRESULT),
-    GeneralFailure(String),
+// Monitor
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MonitorJobCommand {
+    #[serde(with = "GuidSerde")]
+    pub guid: Guid,
+    pub update_interval_ms: Option<u32>,
+    pub log_directory_path: OsString,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct CancelSuccess();
+#[derive(Debug, Deserialize, Serialize)]
+pub struct MonitorJobSuccess();
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub enum CancelFailure {
-    BitsFailure(HRESULT),
-    GeneralFailure(String),
+impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for MonitorJobCommand {
+    type Success = MonitorJobSuccess;
+    type Failure = String;
 }
 
-/*
-impl Serialize for GuidSerde {
-    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer
-    {
-        let bytes: GuidBuf = unsafe { transmute::<GuidSerde, GuidBuf>(self.clone()) };
-        s.serialize_bytes(&bytes)
-    }
+// Cancel
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CancelJobCommand {
+    #[serde(with = "GuidSerde")]
+    pub guid: Guid,
+    pub log_directory_path: OsString,
 }
 
-struct GuidVisitor;
+#[derive(Debug, Deserialize, Serialize)]
+pub struct CancelJobSuccess();
 
-// TODO this may need some work to be 0-copy
-impl<'de> Visitor<'de> for GuidVisitor {
-    type Value = GuidSerde;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "{} bytes", GUID_SIZE)
-    }
-
-    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        if v.len() != GUID_SIZE {
-            Err(E::custom(format!("expected {} bytes", GUID_SIZE)))
-        } else {
-            let mut buf: GuidBuf = unsafe { uninitialized() };
-            buf.copy_from_slice(&v[..GUID_SIZE]);
-            Ok(unsafe { transmute::<GuidBuf, GuidSerde>(buf) })
-        }
-    }
+impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for CancelJobCommand {
+    type Success = CancelJobSuccess;
+    type Failure = String;
 }
-
-impl<'de> Deserialize<'de> for GuidSerde {
-    fn deserialize<D>(d: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>
-    {
-        d.deserialize_bytes(GuidVisitor)
-    }
-}
-*/

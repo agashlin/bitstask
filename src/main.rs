@@ -83,7 +83,12 @@ fn entry() -> Result<(), String> {
 
             println!("success, guid = {}", guid);
         } else {
-            return Err("start takes no arguments".to_string());
+            return Err("bits-start takes no arguments".to_string());
+        },
+        "bits-monitor" => if cmd_args.len() == 1 {
+            client::bits_monitor(&task_name, Guid::from_str(&cmd_args[0].to_string_lossy())?)?;
+        } else {
+            return Err("bits-monitor takes 1 argument".to_string());
         },
         "bits-cancel" => {
             // TODO do all these over one connection
