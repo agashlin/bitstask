@@ -7,7 +7,7 @@ use bincode::{deserialize, serialize};
 use comical::error::{Error, Result};
 use comical::guid::Guid;
 
-use pipe::DuplexPipeServer;
+use pipe::{DuplexPipeServer, InboundPipeServer};
 use protocol::*;
 use task_service::run_on_demand;
 
@@ -52,23 +52,38 @@ where
     }
 }
 
-// TODO: monitoring, second pipe!
 pub fn bits_start(task_name: &OsStr) -> result::Result<Guid, String> {
+    let mut monitor_pipe = InboundPipeServer::new()?;
     let command = StartJobCommand {
         url: OsString::from("http://example.com"),
         save_path: OsString::from("C:\\ProgramData\\example"),
-        update_interval_ms: None,
+        monitor: Some(MonitorConfig {
+            pipe_name: monitor_pipe.name().to_os_string(),
+            interval_ms: 100,
+        }),
         log_directory_path: OsString::from("C:\\ProgramData\\example.log"),
     };
     let mut out_buf: [u8; MAX_RESPONSE] = unsafe { uninitialized() };
     let result = run_command(task_name, command, Command::StartJob, &mut out_buf)?;
     println!("Debug result: {:?}", result);
+
     match result {
-        Ok(r) => Ok(r.guid),
+        Ok(r) => {
+            let mut monitor = monitor_pipe.connect()?;
+            println!("connected to monitor pipe");
+            loop {
+                let mut out_buf: [u8; 512] = unsafe { uninitialized() };
+                let status: BitsJobStatus = deserialize(monitor.read(&mut out_buf)?).unwrap();
+                println!("{:?}", status);
+            }
+
+            Ok(r.guid)
+        }
         Err(e) => Err(format!("error from server {:?}", e)),
     }
 }
 
+/*
 pub fn bits_monitor(task_name: &OsStr, guid: Guid) -> result::Result<(), String> {
     let command = MonitorJobCommand {
         guid,
@@ -83,6 +98,7 @@ pub fn bits_monitor(task_name: &OsStr, guid: Guid) -> result::Result<(), String>
         Err(e) => Err(format!("error from server {:?}", e)),
     }
 }
+*/
 
 pub fn bits_cancel(task_name: &OsStr, guid: Guid) -> result::Result<(), String> {
     let command = CancelJobCommand {

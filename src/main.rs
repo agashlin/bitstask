@@ -69,7 +69,7 @@ fn entry() -> Result<(), String> {
 
     Ok(match &*args[1].to_string_lossy() {
         "install" => if cmd_args.is_empty() {
-            task_service::install(&task_name)?;
+            task_service::install(&task_name, &OsString::from("task $(Arg0) $(Arg1)"))?;
         } else {
             return Err("install takes no argments".to_string());
         },
@@ -86,7 +86,7 @@ fn entry() -> Result<(), String> {
             return Err("bits-start takes no arguments".to_string());
         },
         "bits-monitor" => if cmd_args.len() == 1 {
-            client::bits_monitor(&task_name, Guid::from_str(&cmd_args[0].to_string_lossy())?)?;
+            unimplemented!();
         } else {
             return Err("bits-monitor takes 1 argument".to_string());
         },
@@ -101,7 +101,7 @@ fn entry() -> Result<(), String> {
         }
         "task" => if let Err(s) = server::run(cmd_args) {
             // debug log
-            File::create("C:\\ProgramData\\fail.log")
+            File::create("C:\\ProgramData\\taskfail.log")
                 .unwrap()
                 .write(s.to_string().as_bytes())
                 .unwrap();

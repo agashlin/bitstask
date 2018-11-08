@@ -4,17 +4,16 @@ use std::mem;
 use comical::com::{create_instance_local_server, getter};
 use comical::error::{check_hresult, LabelErrorHResult, Result};
 use comical::guid::Guid;
-use winapi::shared::minwindef::ULONG;
 use winapi::um::bits::{
     BackgroundCopyManager, IBackgroundCopyError, IBackgroundCopyJob, IBackgroundCopyManager,
-    BG_ERROR_CONTEXT, BG_JOB_PRIORITY, BG_JOB_PROGRESS, BG_JOB_STATE, BG_JOB_STATE_ERROR,
-    BG_JOB_STATE_TRANSIENT_ERROR, BG_JOB_TYPE_DOWNLOAD,
+    BG_JOB_PRIORITY, BG_JOB_STATE_ERROR, BG_JOB_STATE_TRANSIENT_ERROR, BG_JOB_TYPE_DOWNLOAD,
 };
-use winapi::um::winnt::HRESULT;
 use wio::com::ComPtr;
 use wio::wide::ToWide;
 
 use comical::{call, get};
+
+use protocol::{BitsJobError, BitsJobStatus};
 
 pub fn connect_bcm() -> Result<ComPtr<IBackgroundCopyManager>> {
     create_instance_local_server::<BackgroundCopyManager, IBackgroundCopyManager>()
@@ -52,18 +51,6 @@ pub trait BitsJob {
     fn complete(&self) -> Result<()>;
     fn cancel(&self) -> Result<()>;
     fn get_status(&self) -> Result<BitsJobStatus>;
-}
-
-pub struct BitsJobError {
-    pub context: BG_ERROR_CONTEXT,
-    pub error: HRESULT,
-}
-
-pub struct BitsJobStatus {
-    pub state: BG_JOB_STATE,
-    pub progress: BG_JOB_PROGRESS,
-    pub error_count: ULONG,
-    pub error: Option<BitsJobError>,
 }
 
 impl BitsJob for ComPtr<IBackgroundCopyJob> {

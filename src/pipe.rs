@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::{CString, OsStr, OsString};
 use std::mem::size_of;
 use std::ptr::null_mut;
 
@@ -15,7 +15,7 @@ use winapi::um::winbase::{
     FILE_FLAG_FIRST_PIPE_INSTANCE, PIPE_ACCESS_DUPLEX, PIPE_ACCESS_INBOUND, PIPE_READMODE_MESSAGE,
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
-use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE};
+use winapi::um::winnt::{FILE_READ_ATTRIBUTES, GENERIC_READ, GENERIC_WRITE};
 use wio::wide::ToWide;
 
 use comical::error::{Error, ErrorCode, Result};
@@ -157,16 +157,19 @@ fn new_pipe_impl(duplex: bool) -> Result<(OsString, Handle)> {
     // Build security attributes
     let sddl = if duplex {
         // Allow read/write access by Local Service.
-        &b"D:(A;;GRGW;;;LS)\0"[..]
+        CString::new("D:(A;;GRGW;;;LS)")
     } else {
-        // Allow write access by Local Service.
-        &b"D:(A;;GW;;;LS)\0"[..]
-    };
+        // Allow write access by Local Service (also need to be able to read attributes).
+        CString::new(format!(
+            "D:(A;;{:#010x};;;LS)",
+            GENERIC_WRITE | FILE_READ_ATTRIBUTES
+        ))
+    }.unwrap();
 
     let psd = unsafe {
         let mut raw_psd = null_mut();
         check_api_nonzero!(ConvertStringSecurityDescriptorToSecurityDescriptorA(
-            sddl.as_ptr() as *const i8,
+            sddl.to_bytes_with_nul().as_ptr() as *const i8,
             SDDL_REVISION_1 as DWORD,
             &mut raw_psd,
             null_mut(),

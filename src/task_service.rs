@@ -61,7 +61,7 @@ fn get_task(task_path: &BStr) -> Result<Option<ComPtr<IRegisteredTask>>> {
     }
 }
 
-pub fn install(task_name: &OsStr) -> Result<()> {
+pub fn install(task_name: &OsStr, command_line: &OsStr) -> Result<()> {
     let task_name = BStr::from(task_name);
     let mut image_path = [0u16; MAX_PATH + 1];
     let mut image_path_size_chars = (image_path.len() - 1) as DWORD;
@@ -136,7 +136,7 @@ pub fn install(task_name: &OsStr) -> Result<()> {
         )?;
         call!(
             exec_action,
-            IExecAction::put_Arguments(BStr::from("task $(Arg0) $(Arg1)").get())
+            IExecAction::put_Arguments(BStr::from(command_line).get())
         )?;
     }
 
