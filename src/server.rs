@@ -1,19 +1,11 @@
 use std::ffi::{OsStr, OsString};
 use std::mem;
-use std::ptr::null_mut;
 use std::result;
 
 use bincode::{deserialize, serialize};
-use winapi::shared::minwindef::DWORD;
-use winapi::um::fileapi::{CreateFileW, ReadFile, WriteFile, OPEN_EXISTING};
-use winapi::um::namedpipeapi::SetNamedPipeHandleState;
-use winapi::um::winbase::PIPE_READMODE_MESSAGE;
-use winapi::um::winnt::{GENERIC_READ, GENERIC_WRITE};
-use wio::wide::ToWide;
-
-use comical::{check_api_nonzero, wrap_api_handle};
 
 use bits::{create_download_job, get_job, BitsJob};
+use pipe::DuplexPipeClient;
 use protocol::*;
 
 pub fn run(args: &[OsString]) -> result::Result<(), String> {
@@ -25,48 +17,16 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
 }
 
 fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
-    let mut pipe_path = OsString::from("\\\\.\\pipe\\");
-    pipe_path.push(pipe_name);
-    let pipe_path = pipe_path.to_wide_null();
-
-    let control_pipe = unsafe {
-        wrap_api_handle!(CreateFileW(
-                pipe_path.as_ptr(),
-                GENERIC_READ | GENERIC_WRITE,
-                0,          // dwShareMode
-                null_mut(), // lpSecurityAttributes
-                OPEN_EXISTING,
-                0,          // dwFlagsAndAttributes
-                null_mut(), // hTemplateFile
-                ))}?;
-
-    let mut mode = PIPE_READMODE_MESSAGE;
-    unsafe {
-        check_api_nonzero!(SetNamedPipeHandleState(
-                *control_pipe,
-                &mut mode,
-                null_mut(), // lpMaxCollectionCount
-                null_mut(), // lpCollectDataTimeout
-                ))
-    }?;
+    let mut control_pipe = DuplexPipeClient::open(pipe_name)?;
 
     loop {
         let mut buf: [u8; MAX_COMMAND] = unsafe { mem::uninitialized() };
-        let mut bytes_read = 0;
         // TODO better handling of errors, not really a disaster if the pipe closes, and
         // we may want to do something with ERROR_MORE_DATA
-        unsafe {
-            check_api_nonzero!(
-                ReadFile(
-                    *control_pipe,
-                    buf.as_mut_ptr() as *mut _,
-                    buf.len() as DWORD,
-                    &mut bytes_read,
-                    null_mut(), // lpOverlapped
-                    ))}?;
+        let buf = control_pipe.read(&mut buf)?;
 
         // TODO setup logging
-        let deserialized_command = deserialize(&buf[..bytes_read as usize]);
+        let deserialized_command = deserialize(buf);
         let mut serialized_response = match deserialized_command {
             // TODO response for undeserializable command?
             Err(_) => return Err("deserialize failed".to_string()),
@@ -76,19 +36,9 @@ fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
         }.unwrap();
         assert!(serialized_response.len() <= MAX_RESPONSE);
 
-        let mut bytes_written = 0;
-        unsafe {
-            check_api_nonzero!(
-                WriteFile(
-                    *control_pipe,
-                    serialized_response.as_mut_ptr() as *mut _,
-                    serialized_response.len() as DWORD,
-                    &mut bytes_written,
-                    null_mut(), // lpOverlapped
-                    ))}?;
+        control_pipe.write(&mut serialized_response)?;
     }
 }
-
 
 fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
     // TODO: gotta capture, return, log errors

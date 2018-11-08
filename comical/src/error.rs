@@ -6,7 +6,6 @@ use winapi::shared::winerror::{HRESULT, SUCCEEDED};
 use winapi::um::errhandlingapi::GetLastError;
 
 // TODO: This should probably use error_chain, to attach messages to underlying API errors.
-// Also would be good to have support for line # since there can be many uses of one API function.
 
 #[derive(Debug)]
 pub enum ErrorCode {

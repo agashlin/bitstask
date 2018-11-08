@@ -1,4 +1,4 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 
 use comical::bstr::BStr;
 use comical::com::{cast, create_instance_inproc_server, getter};
@@ -185,13 +185,10 @@ pub fn uninstall(task_name: &OsStr) -> Result<()> {
     Ok(())
 }
 
-pub fn run_on_demand(task_name: &OsStr, args: &[OsString]) -> Result<()> {
+pub fn run_on_demand(task_name: &OsStr, args: &[&OsStr]) -> Result<()> {
     let task_name = BStr::from(task_name);
 
-    let args = args
-        .iter()
-        .map(|a| BStr::from(a.as_os_str()))
-        .collect::<Vec<_>>();
+    let args = args.into_iter().map(|a| BStr::from(*a)).collect::<Vec<_>>();
 
     let maybe_task = get_task(&task_name)?;
     if maybe_task.is_none() {
