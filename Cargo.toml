@@ -4,7 +4,7 @@ version = "0.0.0"
 authors = ["Adam Gashlin <agashlin@mozilla.com>"]
 
 [patch.crates-io]
-winapi = { path = "../winapi-rs" }
+winapi = { git = "https://github.com/hcs64/winapi-rs", branch = "0.3" }
 
 [dependencies]
 bincode = "1.0"
