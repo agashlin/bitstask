@@ -78,26 +78,36 @@ fn entry() -> Result<(), String> {
         } else {
             return Err("uninstall takes no arguments".to_string());
         },
-        "bits-start" => if cmd_args.is_empty() {
-            let guid = client::bits_start(&task_name)?;
-
-            println!("success, guid = {}", guid);
+        "bits-start" => if cmd_args.len() == 1 {
+            client::run(&task_name, |c| {
+                client::bits_start(
+                    c,
+                    cmd_args[0].clone(),
+                    OsString::from("c:\\ProgramData\\update.mar"),
+                )?;
+                Ok(())
+            })?;
         } else {
             return Err("bits-start takes no arguments".to_string());
         },
         "bits-monitor" => if cmd_args.len() == 1 {
-            unimplemented!();
+            client::run(&task_name, |c| {
+                client::bits_monitor(c, Guid::from_str(&cmd_args[0].to_string_lossy())?)?;
+                Ok(())
+            })?;
         } else {
             return Err("bits-monitor takes 1 argument".to_string());
         },
         "bits-cancel" => {
-            // TODO do all these over one connection
-            for guid in cmd_args
-                .iter()
-                .map(|arg| Guid::from_str(&arg.to_string_lossy()))
-            {
-                client::bits_cancel(&task_name, guid?)?;
-            }
+            client::run(&task_name, |c| {
+                for guid in cmd_args
+                    .iter()
+                    .map(|arg| Guid::from_str(&arg.to_string_lossy()))
+                {
+                    client::bits_cancel(c, guid?)?;
+                }
+                Ok(())
+            })?;
         }
         "task" => if let Err(s) = server::run(cmd_args) {
             // debug log

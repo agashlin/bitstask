@@ -22,8 +22,7 @@ pub fn run(args: &[OsString]) -> result::Result<(), String> {
 fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
     let mut control_pipe = DuplexPipeClient::open(pipe_name)?;
 
-    /*loop*/
-    {
+    loop {
         let mut buf: [u8; MAX_COMMAND] = unsafe { mem::uninitialized() };
         // TODO better handling of errors, not really a disaster if the pipe closes, and
         // we may want to do something with ERROR_MORE_DATA
@@ -42,8 +41,6 @@ fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
 
         control_pipe.write(&mut serialized_response)?;
     }
-
-    thread::sleep(Duration::from_secs(5));
 
     Ok(())
 }

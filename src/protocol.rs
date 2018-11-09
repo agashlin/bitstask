@@ -44,6 +44,7 @@ pub enum Command {
 pub trait CommandType<'a, 'b, 'c>: Deserialize<'a> + Serialize {
     type Success: Deserialize<'b> + Serialize;
     type Failure: Deserialize<'c> + Serialize;
+    fn new(command: Self) -> Command;
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -58,7 +59,6 @@ pub struct StartJobCommand {
     pub url: OsString,
     pub save_path: OsString,
     pub monitor: Option<MonitorConfig>,
-    pub log_directory_path: OsString,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -71,6 +71,9 @@ impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for StartJobCommand {
     type Success = StartJobSuccess;
     // TODO FIXME temporary hack
     type Failure = String;
+    fn new(cmd: Self) -> Command {
+        Command::StartJob(cmd)
+    }
 }
 
 // Monitor
@@ -79,7 +82,6 @@ pub struct MonitorJobCommand {
     #[serde(with = "GuidSerde")]
     pub guid: Guid,
     pub monitor: Option<MonitorConfig>,
-    pub log_directory_path: OsString,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -88,6 +90,9 @@ pub struct MonitorJobSuccess();
 impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for MonitorJobCommand {
     type Success = MonitorJobSuccess;
     type Failure = String;
+    fn new(cmd: Self) -> Command {
+        Command::MonitorJob(cmd)
+    }
 }
 
 // Cancel
@@ -95,7 +100,6 @@ impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for MonitorJobCommand {
 pub struct CancelJobCommand {
     #[serde(with = "GuidSerde")]
     pub guid: Guid,
-    pub log_directory_path: OsString,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -104,6 +108,9 @@ pub struct CancelJobSuccess();
 impl<'a, 'b, 'c> CommandType<'a, 'b, 'c> for CancelJobCommand {
     type Success = CancelJobSuccess;
     type Failure = String;
+    fn new(cmd: Self) -> Command {
+        Command::CancelJob(cmd)
+    }
 }
 
 // Status reports
