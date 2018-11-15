@@ -90,7 +90,7 @@ pub fn bits_start(
         save_path,
         monitor: Some(MonitorConfig {
             pipe_name: monitor_pipe.name().to_os_string(),
-            interval_ms: 100,
+            interval_ms: 5000,
         }),
     };
 

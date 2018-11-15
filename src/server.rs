@@ -7,7 +7,7 @@ use std::time::Duration;
 use bincode::{deserialize, serialize};
 use comical::com::ComInited;
 
-use bits::{create_download_job, get_job, BitsJob};
+use bits::BitsJob;
 use pipe::{DuplexPipeClient, OutboundPipeClient};
 use protocol::*;
 
@@ -47,11 +47,11 @@ fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
 
 fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
     // TODO: gotta capture, return, log errors
-    let (guid, job) = create_download_job(&OsString::from("JOBBO"))?;
+    let mut job = BitsJob::new(&OsString::from("JOBBO"))?;
     job.add_file(&cmd.url, &cmd.save_path)?;
     job.resume()?;
 
-    let guid_clone = guid.clone();
+    let guid_clone = job.guid()?;
     if let Some(MonitorConfig {
         pipe_name,
         interval_ms,
@@ -60,10 +60,22 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
         thread::spawn(move || {
             let result = std::panic::catch_unwind(|| {
                 // TODO none of this stuff (except serialize) should be `unwrap`
-                let _inited = ComInited::init_sta().unwrap();
-                let job = get_job(&guid_clone).unwrap();
+                let _inited = ComInited::init_mta().unwrap();
+                let mut job = BitsJob::get_by_guid(&guid_clone).unwrap();
                 let mut pipe = OutboundPipeClient::open(&pipe_name).unwrap();
                 let delay = Duration::from_millis(interval_ms as u64);
+
+                job.register_callbacks(
+                    Some(Box::new(|| {
+                        use std::io::Write;
+                        std::fs::File::create("C:\\ProgramData\\monitortransferred.log")
+                            .unwrap()
+                            .write("ok!".as_bytes())
+                            .unwrap();
+                    })),
+                    None,
+                    None,
+                );
 
                 loop {
                     let status = job.get_status().unwrap();
@@ -81,7 +93,7 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
         });
     }
 
-    Ok(StartJobSuccess { guid })
+    Ok(StartJobSuccess { guid: job.guid()? })
 }
 
 fn run_monitor(_cmd: &MonitorJobCommand) -> result::Result<MonitorJobSuccess, String> {
@@ -89,7 +101,7 @@ fn run_monitor(_cmd: &MonitorJobCommand) -> result::Result<MonitorJobSuccess, St
 }
 
 fn run_cancel(cmd: &CancelJobCommand) -> result::Result<CancelJobSuccess, String> {
-    let job = get_job(&cmd.guid)?;
+    let mut job = BitsJob::get_by_guid(&cmd.guid)?;
     job.cancel()?;
 
     Ok(CancelJobSuccess())

@@ -1,7 +1,7 @@
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Error, Formatter, Result};
 use std::iter;
-use std::mem::{size_of, transmute, uninitialized};
+use std::mem::{size_of, transmute, transmute_copy, uninitialized};
 use std::result;
 use std::str::FromStr;
 
@@ -18,7 +18,16 @@ const GUID_STRING_CHARACTERS: usize = 38;
 #[repr(transparent)]
 pub struct Guid(pub GUID);
 
+// TODO: I don't know if this is actually valid given padding, do something safer field-by-field?
 pub type GuidBuf = [u8; size_of::<GUID>()];
+
+impl PartialEq for Guid {
+    fn eq(&self, other: &Guid) -> bool {
+        unsafe { transmute_copy::<Guid, GuidBuf>(self) == transmute_copy::<Guid, GuidBuf>(other) }
+    }
+}
+
+impl Eq for Guid {}
 
 impl Debug for Guid {
     fn fmt(&self, f: &mut Formatter) -> Result {

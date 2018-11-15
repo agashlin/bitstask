@@ -25,6 +25,7 @@ winapi = { version = "0.3.6", features = ["basetsd",
                                           "rpcdce",
                                           "sddl",
                                           "taskschd",
+                                          "unknwnbase",
                                           "winbase",
                                           "winerror",
                                           "winnt"] }
