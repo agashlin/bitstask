@@ -66,12 +66,8 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
                 let delay = Duration::from_millis(interval_ms as u64);
 
                 job.register_callbacks(
-                    Some(Box::new(|| {
-                        use std::io::Write;
-                        std::fs::File::create("C:\\ProgramData\\monitortransferred.log")
-                            .unwrap()
-                            .write("ok!".as_bytes())
-                            .unwrap();
+                    Some(Box::new(|mut job| {
+                        job.complete().expect("complete failed?!");
                     })),
                     None,
                     None,

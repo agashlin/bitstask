@@ -20,8 +20,6 @@ use comical::{call, get};
 
 use protocol::{BitsJobError, BitsJobStatus};
 
-pub type Callback = (Fn() -> () + RefUnwindSafe + Send + Sync + 'static);
-
 pub fn connect_bcm() -> Result<ComPtr<IBackgroundCopyManager>> {
     create_instance_local_server::<BackgroundCopyManager, IBackgroundCopyManager>()
 }
@@ -55,6 +53,10 @@ impl BitsJob {
         let job = unsafe { get!(|job| bcm, IBackgroundCopyManager::GetJob(&guid.0, job)) }?;
 
         Ok(BitsJob { job })
+    }
+
+    unsafe fn from_ptr(job: ComPtr<IBackgroundCopyJob>) -> BitsJob {
+        BitsJob { job }
     }
 
     pub fn guid(&self) -> Result<Guid> {
@@ -119,9 +121,9 @@ impl BitsJob {
 
     pub fn register_callbacks(
         &mut self,
-        transferred: Option<Box<Callback>>,
-        error: Option<Box<Callback>>,
-        modification: Option<Box<Callback>>,
+        transferred: Option<Box<callback::TransferredCallback>>,
+        error: Option<Box<callback::ErrorCallback>>,
+        modification: Option<Box<callback::ModificationCallback>>,
     ) -> Result<()>
 where {
         // TODO check via GetNotifyInterface
@@ -192,22 +194,26 @@ where {
             error: if state == BG_JOB_STATE_ERROR || state == BG_JOB_STATE_TRANSIENT_ERROR {
                 let error_obj = unsafe { get!(|e| self.job, IBackgroundCopyJob::GetError(e)) }?;
 
-                let mut context = 0;
-                let mut hresult = 0;
-                unsafe {
-                    call!(
-                        error_obj,
-                        IBackgroundCopyError::GetError(&mut context, &mut hresult)
-                    )
-                }?;
-
-                Some(BitsJobError {
-                    context,
-                    error: hresult,
-                })
+                Some(BitsJob::get_error(error_obj)?)
             } else {
                 None
             },
+        })
+    }
+
+    fn get_error(error_obj: ComPtr<IBackgroundCopyError>) -> Result<BitsJobError> {
+        let mut context = 0;
+        let mut hresult = 0;
+        unsafe {
+            call!(
+                error_obj,
+                IBackgroundCopyError::GetError(&mut context, &mut hresult)
+            )
+        }?;
+
+        Ok(BitsJobError {
+            context,
+            error: hresult,
         })
     }
 }
@@ -228,15 +234,22 @@ mod callback {
     };
     use winapi::um::unknwnbase::{IUnknown, IUnknownVtbl};
     use winapi::Interface;
+    use wio::com::ComPtr;
 
-    use bits::Callback;
+    use bits::{BitsJob, BitsJobError};
+
+    pub type TransferredCallback = (Fn(BitsJob) -> () + RefUnwindSafe + Send + Sync + 'static);
+    pub type ErrorCallback =
+        (Fn(BitsJob, BitsJobError) -> () + RefUnwindSafe + Send + Sync + 'static);
+    pub type ModificationCallback = (Fn(BitsJob) -> () + RefUnwindSafe + Send + Sync + 'static);
 
     #[repr(C)]
     pub struct BackgroundCopyCallback {
         pub interface: IBackgroundCopyCallback,
-        pub transferred: Option<Box<Callback>>,
-        pub error: Option<Box<Callback>>,
-        pub modification: Option<Box<Callback>>,
+        // TODO return from callback should be an error that can be logged?
+        pub transferred: Option<Box<TransferredCallback>>,
+        pub error: Option<Box<ErrorCallback>>,
+        pub modification: Option<Box<ModificationCallback>>,
     }
 
     extern "system" fn query_interface(
@@ -268,31 +281,61 @@ mod callback {
     }
 
     extern "system" fn transferred_stub(
-        This: *mut IBackgroundCopyCallback,
-        _pJob: *mut IBackgroundCopyJob,
+        this: *mut IBackgroundCopyCallback,
+        job: *mut IBackgroundCopyJob,
     ) -> HRESULT {
         unsafe {
-            let this = This as *mut BackgroundCopyCallback;
+            let this = this as *mut BackgroundCopyCallback;
             if let Some(cb) = (*this).transferred.as_ref() {
-                catch_unwind(|| cb());
+                // TODO: argue about this
+                (*job).AddRef();
+                let result = catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job))));
+                // TODO: proper logging
+                if let Err(e) = result {
+                    use std::io::Write;
+                    if let Ok(mut file) = std::fs::File::create("C:\\ProgramData\\callbackfail.log")
+                    {
+                        file.write(format!("{:?}", e.downcast_ref::<String>()).as_bytes());
+                    }
+                }
             }
         }
         S_OK
     }
 
     extern "system" fn error_stub(
-        This: *mut IBackgroundCopyCallback,
-        _pJob: *mut IBackgroundCopyJob,
-        _pError: *mut IBackgroundCopyError,
+        this: *mut IBackgroundCopyCallback,
+        job: *mut IBackgroundCopyJob,
+        error: *mut IBackgroundCopyError,
     ) -> HRESULT {
+        unsafe {
+            let this = this as *mut BackgroundCopyCallback;
+            if let Some(cb) = (*this).error.as_ref() {
+                (*job).AddRef();
+                (*error).AddRef();
+                catch_unwind(|| {
+                    cb(
+                        BitsJob::from_ptr(ComPtr::from_raw(job)),
+                        BitsJob::get_error(ComPtr::from_raw(error)).expect("unwrapping"),
+                    )
+                });
+            }
+        }
         S_OK
     }
 
     extern "system" fn modification_stub(
-        This: *mut IBackgroundCopyCallback,
-        _pJob: *mut IBackgroundCopyJob,
+        this: *mut IBackgroundCopyCallback,
+        job: *mut IBackgroundCopyJob,
         _dwReserved: DWORD,
     ) -> HRESULT {
+        unsafe {
+            let this = this as *mut BackgroundCopyCallback;
+            if let Some(cb) = (*this).modification.as_ref() {
+                (*job).AddRef();
+                catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job))));
+            }
+        }
         S_OK
     }
 
