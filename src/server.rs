@@ -41,8 +41,6 @@ fn run_commands(pipe_name: &OsStr) -> result::Result<(), String> {
 
         control_pipe.write(&mut serialized_response)?;
     }
-
-    Ok(())
 }
 
 fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
@@ -59,24 +57,33 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
     {
         thread::spawn(move || {
             let result = std::panic::catch_unwind(|| {
+                use std::panic::AssertUnwindSafe;
+                use std::sync::{Arc, Condvar, Mutex};
+                // TODO I don't know if the AssertUnwindSafe here is justified
+                let cvar = Arc::new((AssertUnwindSafe(Condvar::new()), Mutex::new(())));
+
                 // TODO none of this stuff (except serialize) should be `unwrap`
                 let _inited = ComInited::init_mta().unwrap();
                 let mut job = BitsJob::get_by_guid(&guid_clone).unwrap();
                 let mut pipe = OutboundPipeClient::open(&pipe_name).unwrap();
                 let delay = Duration::from_millis(interval_ms as u64);
 
+                let cvar2 = cvar.clone();
                 job.register_callbacks(
-                    Some(Box::new(|mut job| {
+                    Some(Box::new(move |mut job| {
                         job.complete().expect("complete failed?!");
+                        let _locked = cvar2.1.lock().unwrap();
+                        cvar2.0.notify_all();
                     })),
                     None,
                     None,
-                );
+                ).unwrap();
 
+                let mut locked = cvar.1.lock().unwrap();
                 loop {
                     let status = job.get_status().unwrap();
                     pipe.write(&mut serialize(&status).unwrap()).unwrap();
-                    thread::sleep(delay);
+                    locked = cvar.0.wait_timeout(locked, delay).unwrap().0;
                 }
             });
             if let Err(e) = result {

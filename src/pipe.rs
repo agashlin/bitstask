@@ -289,6 +289,7 @@ impl DuplexPipeClient {
         write_pipe_impl(&self.pipe, in_buf)
     }
 
+    #[allow(dead_code)]
     pub fn flush(&mut self) -> Result<()> {
         flush_pipe_impl(&self.pipe)
     }
@@ -321,6 +322,7 @@ impl OutboundPipeClient {
         write_pipe_impl(&self.pipe, in_buf)
     }
 
+    #[allow(dead_code)]
     pub fn flush(&mut self) -> Result<()> {
         flush_pipe_impl(&self.pipe)
     }

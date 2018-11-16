@@ -1,6 +1,5 @@
 use std::ffi::OsStr;
 use std::mem;
-use std::panic::RefUnwindSafe;
 
 use comical::com::{create_instance_local_server, getter};
 use comical::error::{check_hresult, LabelErrorHResult, Result};
@@ -15,7 +14,6 @@ use winapi::um::unknwnbase::IUnknown;
 use wio::com::ComPtr;
 use wio::wide::ToWide;
 
-use comical::error::Error;
 use comical::{call, get};
 
 use protocol::{BitsJobError, BitsJobStatus};
@@ -28,6 +26,7 @@ pub struct BitsJob {
     job: ComPtr<IBackgroundCopyJob>,
 }
 
+#[allow(dead_code)]
 impl BitsJob {
     pub fn new(display_name: &OsStr) -> Result<Self> {
         let bcm = connect_bcm()?;
@@ -219,7 +218,6 @@ where {
 }
 
 mod callback {
-    use std::borrow::BorrowMut;
     use std::panic::{catch_unwind, RefUnwindSafe};
 
     use comical::guid::Guid;
@@ -253,16 +251,16 @@ mod callback {
     }
 
     extern "system" fn query_interface(
-        This: *mut IUnknown,
+        this: *mut IUnknown,
         riid: REFIID,
-        ppvObj: *mut *mut c_void,
+        obj: *mut *mut c_void,
     ) -> HRESULT {
         unsafe {
             if Guid(*riid) == Guid(IUnknown::uuidof())
                 || Guid(*riid) == Guid(IBackgroundCopyCallback::uuidof())
             {
-                addref(This);
-                *ppvObj = This as *mut c_void;
+                addref(this);
+                *obj = this as *mut c_void;
                 NOERROR
             } else {
                 E_NOINTERFACE
@@ -270,12 +268,12 @@ mod callback {
         }
     }
 
-    extern "system" fn addref(_This: *mut IUnknown) -> ULONG {
+    extern "system" fn addref(_this: *mut IUnknown) -> ULONG {
         // TODO learn Rust synchronization
         1
     }
 
-    extern "system" fn release(_This: *mut IUnknown) -> ULONG {
+    extern "system" fn release(_this: *mut IUnknown) -> ULONG {
         // TODO
         1
     }
@@ -295,7 +293,10 @@ mod callback {
                     use std::io::Write;
                     if let Ok(mut file) = std::fs::File::create("C:\\ProgramData\\callbackfail.log")
                     {
-                        file.write(format!("{:?}", e.downcast_ref::<String>()).as_bytes());
+                        #[allow(unused_must_use)]
+                        {
+                            file.write(format!("{:?}", e.downcast_ref::<String>()).as_bytes());
+                        }
                     }
                 }
             }
@@ -313,12 +314,14 @@ mod callback {
             if let Some(cb) = (*this).error.as_ref() {
                 (*job).AddRef();
                 (*error).AddRef();
-                catch_unwind(|| {
+                if let Err(_e) = catch_unwind(|| {
                     cb(
                         BitsJob::from_ptr(ComPtr::from_raw(job)),
                         BitsJob::get_error(ComPtr::from_raw(error)).expect("unwrapping"),
                     )
-                });
+                }) {
+                    // TODO logging
+                }
             }
         }
         S_OK
@@ -327,13 +330,15 @@ mod callback {
     extern "system" fn modification_stub(
         this: *mut IBackgroundCopyCallback,
         job: *mut IBackgroundCopyJob,
-        _dwReserved: DWORD,
+        _reserved: DWORD,
     ) -> HRESULT {
         unsafe {
             let this = this as *mut BackgroundCopyCallback;
             if let Some(cb) = (*this).modification.as_ref() {
                 (*job).AddRef();
-                catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job))));
+                if let Err(_e) = catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job)))) {
+                    // TODO logging
+                }
             }
         }
         S_OK
