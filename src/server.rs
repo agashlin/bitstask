@@ -57,10 +57,8 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
     {
         thread::spawn(move || {
             let result = std::panic::catch_unwind(|| {
-                use std::panic::AssertUnwindSafe;
-                use std::sync::{Arc, Condvar, Mutex};
-                // TODO I don't know if the AssertUnwindSafe here is justified
-                let cvar = Arc::new((AssertUnwindSafe(Condvar::new()), Mutex::new(())));
+                use std::sync::mpsc::channel;
+                let (tx, rx) = channel();
 
                 // TODO none of this stuff (except serialize) should be `unwrap`
                 let _inited = ComInited::init_mta().unwrap();
@@ -68,22 +66,29 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
                 let mut pipe = OutboundPipeClient::open(&pipe_name).unwrap();
                 let delay = Duration::from_millis(interval_ms as u64);
 
-                let cvar2 = cvar.clone();
+                let tx_mutex = std::sync::Mutex::new(tx);
                 job.register_callbacks(
                     Some(Box::new(move |mut job| {
                         job.complete().expect("complete failed?!");
-                        let _locked = cvar2.1.lock().unwrap();
-                        cvar2.0.notify_all();
+
+                        let tx = tx_mutex.lock().unwrap().clone();
+
+                        #[allow(unused_must_use)]
+                        {
+                            tx.send(());
+                        }
                     })),
                     None,
                     None,
                 ).unwrap();
 
-                let mut locked = cvar.1.lock().unwrap();
                 loop {
                     let status = job.get_status().unwrap();
                     pipe.write(&mut serialize(&status).unwrap()).unwrap();
-                    locked = cvar.0.wait_timeout(locked, delay).unwrap().0;
+                    #[allow(unused_must_use)]
+                    {
+                        rx.recv_timeout(delay);
+                    }
                 }
             });
             if let Err(e) = result {
