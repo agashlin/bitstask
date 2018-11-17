@@ -284,8 +284,9 @@ mod callback {
     ) -> HRESULT {
         unsafe {
             let this = this as *mut BackgroundCopyCallback;
-            if let Some(cb) = (*this).transferred.as_ref() {
-                // TODO: argue about this
+            if let Some(ref cb) = (*this).transferred {
+                // TODO: argue about this, BitsJob should probably have an unsafe from_raw that
+                // does this and also ComPtr::from_raw internally
                 (*job).AddRef();
                 let result = catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job))));
                 // TODO: proper logging
@@ -311,7 +312,7 @@ mod callback {
     ) -> HRESULT {
         unsafe {
             let this = this as *mut BackgroundCopyCallback;
-            if let Some(cb) = (*this).error.as_ref() {
+            if let Some(ref cb) = (*this).error {
                 (*job).AddRef();
                 (*error).AddRef();
                 if let Err(_e) = catch_unwind(|| {
@@ -334,7 +335,7 @@ mod callback {
     ) -> HRESULT {
         unsafe {
             let this = this as *mut BackgroundCopyCallback;
-            if let Some(cb) = (*this).modification.as_ref() {
+            if let Some(ref cb) = (*this).modification {
                 (*job).AddRef();
                 if let Err(_e) = catch_unwind(|| cb(BitsJob::from_ptr(ComPtr::from_raw(job)))) {
                     // TODO logging

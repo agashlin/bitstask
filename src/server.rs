@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use bincode::{deserialize, serialize};
 use comical::com::ComInited;
+use comical::guid::Guid;
 
 use bits::BitsJob;
 use pipe::{DuplexPipeClient, OutboundPipeClient};
@@ -49,63 +50,74 @@ fn run_start(cmd: &StartJobCommand) -> result::Result<StartJobSuccess, String> {
     job.add_file(&cmd.url, &cmd.save_path)?;
     job.resume()?;
 
-    let guid_clone = job.guid()?;
-    if let Some(MonitorConfig {
-        pipe_name,
-        interval_ms,
-    }) = cmd.monitor.clone()
-    {
-        thread::spawn(move || {
-            let result = std::panic::catch_unwind(|| {
-                use std::sync::mpsc::channel;
-                let (tx, rx) = channel();
-
-                // TODO none of this stuff (except serialize) should be `unwrap`
-                let _inited = ComInited::init_mta().unwrap();
-                let mut job = BitsJob::get_by_guid(&guid_clone).unwrap();
-                let mut pipe = OutboundPipeClient::open(&pipe_name).unwrap();
-                let delay = Duration::from_millis(interval_ms as u64);
-
-                let tx_mutex = std::sync::Mutex::new(tx);
-                job.register_callbacks(
-                    Some(Box::new(move |mut job| {
-                        job.complete().expect("complete failed?!");
-
-                        let tx = tx_mutex.lock().unwrap().clone();
-
-                        #[allow(unused_must_use)]
-                        {
-                            tx.send(());
-                        }
-                    })),
-                    None,
-                    None,
-                ).unwrap();
-
-                loop {
-                    let status = job.get_status().unwrap();
-                    pipe.write(&mut serialize(&status).unwrap()).unwrap();
-                    #[allow(unused_must_use)]
-                    {
-                        rx.recv_timeout(delay);
-                    }
-                }
-            });
-            if let Err(e) = result {
-                use std::io::Write;
-                std::fs::File::create("C:\\ProgramData\\monitorfail.log")
-                    .unwrap()
-                    .write(format!("{:?}", e.downcast_ref::<String>()).as_bytes())
-                    .unwrap();
-            }
-        });
+    if let Some(ref monitor) = cmd.monitor {
+        start_monitor(job.guid()?, monitor);
     }
-
     Ok(StartJobSuccess { guid: job.guid()? })
 }
 
-fn run_monitor(_cmd: &MonitorJobCommand) -> result::Result<MonitorJobSuccess, String> {
-    Err("monitor unimplemented".to_string())
+fn run_monitor(cmd: &MonitorJobCommand) -> result::Result<MonitorJobSuccess, String> {
+    let job = BitsJob::get_by_guid(&cmd.guid)?;
+
+    if let Some(ref monitor) = cmd.monitor {
+        start_monitor(job.guid()?, monitor);
+    }
+    Ok(MonitorJobSuccess())
+}
+
+fn start_monitor(
+    guid: Guid,
+    MonitorConfig {
+        pipe_name,
+        interval_ms,
+    }: &MonitorConfig,
+) {
+    let interval_ms = *interval_ms;
+    let pipe_name = pipe_name.clone();
+    thread::spawn(move || {
+        let result = std::panic::catch_unwind(|| {
+            use std::sync::mpsc::channel;
+            let (tx, rx) = channel();
+
+            // TODO none of this stuff (except serialize) should be `unwrap`
+            let _inited = ComInited::init_mta().unwrap();
+            let mut job = BitsJob::get_by_guid(&guid).unwrap();
+            let mut pipe = OutboundPipeClient::open(&pipe_name).unwrap();
+            let delay = Duration::from_millis(interval_ms as u64);
+
+            let tx_mutex = std::sync::Mutex::new(tx);
+            job.register_callbacks(
+                Some(Box::new(move |mut job| {
+                    job.complete().expect("complete failed?!");
+
+                    let tx = tx_mutex.lock().unwrap().clone();
+
+                    #[allow(unused_must_use)]
+                    {
+                        tx.send(());
+                    }
+                })),
+                None,
+                None,
+            ).unwrap();
+
+            loop {
+                let status = job.get_status().unwrap();
+                pipe.write(&mut serialize(&status).unwrap()).unwrap();
+                #[allow(unused_must_use)]
+                {
+                    rx.recv_timeout(delay);
+                }
+            }
+        });
+        if let Err(e) = result {
+            use std::io::Write;
+            std::fs::File::create("C:\\ProgramData\\monitorfail.log")
+                .unwrap()
+                .write(format!("{:?}", e.downcast_ref::<String>()).as_bytes())
+                .unwrap();
+        }
+    });
 }
 
 fn run_cancel(cmd: &CancelJobCommand) -> result::Result<CancelJobSuccess, String> {

@@ -114,7 +114,7 @@ pub fn bits_monitor(connection: &mut DuplexPipeConnection, guid: Guid) -> Result
         guid,
         monitor: Some(MonitorConfig {
             pipe_name: monitor_pipe.name().to_os_string(),
-            interval_ms: 100,
+            interval_ms: 10000,
         }),
     };
 
